@@ -148,12 +148,6 @@ async def on_ready():
 # Basic test command
 @bot.command()
 async def ping(ctx):
-    commands_embed = discord.Embed(
-                    title=f"Commands",
-                    description=f"!rs - Command to fetch most recent match data\n!stats - Command to fetch ranked stats for a player\n!ping - Command to test that bot is active",
-                    color=discord.Color.blue()
-                )
-    await ctx.send(embed=commands_embed)
     await ctx.send('Lima Oscar Lima!')
 
 # Command to fetch TFT stats
@@ -175,14 +169,18 @@ async def rs(ctx, gameName: str, tagLine: str):
 
 # Command to check all available commands
 @bot.command()
-async def bot_commands(ctx): 
+async def commands(ctx): 
     commands_embed = discord.Embed(
-                    title=f"Commands",
-                    description=f"!rs - Command to fetch most recent match data\n!stats - Command to fetch ranked stats for a player\n!ping - Command to test that bot is active",
+                    title=f"Commands List",
+                    description=f"""
+                    **!rs** - Fetch most recent match data
+                    **!stats** - Check ranked stats for a player
+                    **!ping** - Test that bot is active
+                    **!commands** - Get a list of all commands
+                    """,
                     color=discord.Color.blue()
                 )
     await ctx.send(embed=commands_embed)
-    await ctx.send('testtestest')
     
 # Run the bot with your token
 bot.run(bot_token)
