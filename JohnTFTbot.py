@@ -26,7 +26,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 mass_region = "americas"
 region = "na1"
 
-# Get Rank icons
+# Dictionary to store rank icons from GitHub
 RANK_ICON_URLS = {
     "IRON": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/iron.png",
     "BRONZE": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/bronze.png",
@@ -53,9 +53,6 @@ def get_puuid(gameName, tagLine):
         return None
 
 # Function to get rank info
-# Dictionary to store rank icons from GitHub
-
-
 def get_rank_embed(gameName, tagLine):
     """Fetch TFT rank and return a Discord embed with a rank icon."""
     puuid = get_puuid(gameName, tagLine)
@@ -93,7 +90,7 @@ def get_rank_embed(gameName, tagLine):
     except Exception as err:
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
-
+# Function to grab previous match data
 def last_match(gameName, tagLine):
     puuid = get_puuid(gameName, tagLine)
     if not puuid:
@@ -142,7 +139,6 @@ def last_match(gameName, tagLine):
     
     except Exception as err:
         return f"Error fetching last match for {gameName}#{tagLine}: {err}"
-
 
 # Show bot is online
 @bot.event
