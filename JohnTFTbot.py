@@ -158,6 +158,22 @@ def last_match(gameName, tagLine):
     except Exception as err:
         return f"Error fetching last match for {gameName}#{tagLine}: {err}"
 
+def check_data(id):
+    user_id = str(id)
+        
+    # Query the database for the user's data
+    user_data = collection.find_one({"discord_id": user_id})
+
+    if user_data:
+        # If user is linked, use stored data as name and tag
+        gameName = user_data['name']
+        tagLine = user_data['tag']
+        # Indicates that user has linked data
+        return True, gameName, tagLine
+    else:
+        # If user isn't linked, inform the user
+        return False, None, None
+
 # Show bot is online
 @bot.event
 async def on_ready():
@@ -170,50 +186,37 @@ async def ping(ctx):
 
 # Command to fetch TFT stats
 @bot.command()
-async def stats(ctx, gameName: str, tagLine: str):
+async def stats(ctx, gameName: str = None, tagLine: str = None):
     """Fetch and display TFT rank stats for a player."""
-    rank_embed, error_message = get_rank_embed(gameName, tagLine)  # Unpack tuple
-
-    if error_message:
-        await ctx.send(error_message)  # Send error as text
-    else:
-        await ctx.send(embed=rank_embed)  # Send embed
-
-# Command to fetch last match data
-@bot.command()
-async def rs(ctx, gameName: str, tagLine: str):
-    result = last_match(gameName, tagLine)
-    result_embed = discord.Embed(
-                    title=f"Last TFT Match Placements:",
-                    description=result,
-                    color=discord.Color.blue()
-                )
-    await ctx.send(embed=result_embed)
-
-# Same as rs
-@bot.command()
-async def r(ctx, gameName: str = None, tagLine: str = None):
     if gameName is None and tagLine is None:
-        user_id = str(ctx.author.id)
-        
-        # Query the database for the user's data
-        user_data = collection.find_one({"discord_id": user_id})
-
-        if user_data:
-            # If user is linked, use stored data as name and tag
-            gameName = user_data['name']
-            tagLine = user_data['tag']
-            # Indicates that user has linked data
-            linked = True
-        else:
-            # If user isn't linked, inform the user
-            await ctx.send("You have not linked any data. Use `!link <name> <tag>` to link your account.")
-            linked = False
+        # No args present, check if account is linked
+        data, gameName, tagLine = check_data(ctx.author.id)
     else: 
         # Name and tag were typed as args, no need to check for link
         args = True
 
-    if linked or args:
+    if data or args:
+        rank_embed, error_message = get_rank_embed(gameName, tagLine)  # Unpack tuple
+
+        if error_message:
+            await ctx.send(error_message)  # Send error as text
+        else:
+            await ctx.send(embed=rank_embed)  # Send embed
+    else:
+        await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+
+
+# Command to fetch last match data
+@bot.command(name="r", aliases=["rs"])
+async def r(ctx, gameName: str = None, tagLine: str = None):
+    if gameName is None and tagLine is None:
+        # No args present, check if account is linked
+        data, gameName, tagLine = check_data(ctx.author.id)
+    else: 
+        # Name and tag were typed as args, no need to check for link
+        args = True
+
+    if data or args:
         result = last_match(gameName, tagLine)
         result_embed = discord.Embed(
                         title=f"Last TFT Match Placements:",
@@ -221,6 +224,8 @@ async def r(ctx, gameName: str = None, tagLine: str = None):
                         color=discord.Color.blue()
                     )
         await ctx.send(embed=result_embed)
+    else:
+        await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
 
 # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
 @bot.command()
@@ -257,8 +262,8 @@ async def link(ctx, name: str, tag: str):
         # If no data exists, insert a new document for the user
         collection.insert_one({
             "discord_id": user_id,
-            "name": tag,
-            "name": tag
+            "name": name,
+            "tag": tag
         })
         await ctx.send(f"Your data has been linked: {name} {tag}")
     
