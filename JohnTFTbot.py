@@ -5,6 +5,19 @@ import os
 from discord.ext import commands
 from riotwatcher import TftWatcher
 from dotenv import load_dotenv
+from pymongo.mongo_client import MongoClient
+
+uri = "mongodb+srv://sosafelix:lee2014kms2017@tfteamusers.deozh.mongodb.net/?retryWrites=true&w=majority&appName=TFTeamUsers"
+
+# Create a new client and connect to the server
+client = MongoClient(uri)
+
+# Send a ping to confirm a successful connection
+try:
+    client.admin.command('ping')
+    print("Pinged your deployment. You successfully connected to MongoDB!")
+except Exception as e:
+    print(e)
 
 # Load the .env file
 load_dotenv()
@@ -131,9 +144,12 @@ def last_match(gameName, tagLine):
         players_data.sort()
 
         # Format the message
-        result = "**Last TFT Match Placements:**\n"
+        result = ""
         for placement, name in players_data:
-            result += f"🏆 **{placement}** - {name}\n"
+            if placement != 8:
+                result += f"🏆 **{placement}** - {name}\n"
+            else:
+                result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
         return result
     
@@ -165,15 +181,31 @@ async def stats(ctx, gameName: str, tagLine: str):
 @bot.command()
 async def rs(ctx, gameName: str, tagLine: str):
     result = last_match(gameName, tagLine)
-    await ctx.send(result)
+    result_embed = discord.Embed(
+                    title=f"Last TFT Match Placements:",
+                    description=result,
+                    color=discord.Color.blue()
+                )
+    await ctx.send(embed=result_embed)
 
-# Command to check all available commands
+# Same as rs
+@bot.command()
+async def r(ctx, gameName: str, tagLine: str):
+    result = last_match(gameName, tagLine)
+    result_embed = discord.Embed(
+                    title=f"Last TFT Match Placements:",
+                    description=result,
+                    color=discord.Color.blue()
+                )
+    await ctx.send(embed=result_embed)
+
+# Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
 @bot.command()
 async def commands(ctx): 
     commands_embed = discord.Embed(
                     title=f"Commands List",
                     description=f"""
-                    **!rs** - Fetch most recent match data
+                    **!rs / !r** - Fetch most recent match data
                     **!stats** - Check ranked stats for a player
                     **!ping** - Test that bot is active
                     **!commands** - Get a list of all commands
