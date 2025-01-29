@@ -231,16 +231,16 @@ async def r(ctx, gameName: str = None, tagLine: str = None):
 @bot.command()
 async def commands(ctx): 
     commands_embed = discord.Embed(
-                    title=f"Commands List",
-                    description=f"""
-                    **!rs / !r** - Fetch most recent match data
-                    **!stats** - Check ranked stats for a player
-                    **!ping** - Test that bot is active
-                    **!commands** - Get a list of all commands
-                    **!link** - Link discord account to riot account
-                    """,
-                    color=discord.Color.blue()
-                )
+    title=f"Commands List",
+    description=f"""
+**!rs / !r** - Fetch most recent match data\n
+**!stats** - Check ranked stats for a player\n
+**!ping** - Test that bot is active\n
+**!commands** - Get a list of all commands\n
+**!link** - Link discord account to riot account
+    """,
+    color=discord.Color.blue()
+    )
     await ctx.send(embed=commands_embed)
 
 # Command to link riot and discord accounts, stored in mongodb database
