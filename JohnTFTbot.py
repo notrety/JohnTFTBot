@@ -154,18 +154,28 @@ async def ping(ctx):
 @bot.command()
 async def stats(ctx, gameName: str, tagLine: str):
     """Fetch and display TFT rank stats for a player."""
-    embed, error_message = get_rank_embed(gameName, tagLine)  # Unpack tuple
+    rank_embed, error_message = get_rank_embed(gameName, tagLine)  # Unpack tuple
 
     if error_message:
         await ctx.send(error_message)  # Send error as text
     else:
-        await ctx.send(embed=embed)  # Send embed
+        await ctx.send(embed=rank_embed)  # Send embed
 
 # Command to fetch last match data
 @bot.command()
 async def rs(ctx, gameName: str, tagLine: str):
     result = last_match(gameName, tagLine)
     await ctx.send(result)
+
+# Command to check all available commands
+@bot.command()
+async def commands(ctx):
+    commands_embed = discord.Embed(
+                    title=f"Commands",
+                    description=f"!rs - Command to fetch most recent match data\n!stats - Command to fetch ranked stats for a player\n!ping - Command to test that bot is active",
+                    color=discord.Color.blue()
+                )
+    await ctx.send(embed=commands_embed)
     
 # Run the bot with your token
 bot.run(bot_token)
