@@ -11,6 +11,8 @@ uri = "mongodb+srv://sosafelix:lee2014kms2017@tfteamusers.deozh.mongodb.net/?ret
 
 # Create a new client and connect to the server
 client = MongoClient(uri)
+db = client["Users"]
+collection = db["users"]
 
 # Send a ping to confirm a successful connection
 try:
@@ -190,14 +192,35 @@ async def rs(ctx, gameName: str, tagLine: str):
 
 # Same as rs
 @bot.command()
-async def r(ctx, gameName: str, tagLine: str):
-    result = last_match(gameName, tagLine)
-    result_embed = discord.Embed(
-                    title=f"Last TFT Match Placements:",
-                    description=result,
-                    color=discord.Color.blue()
-                )
-    await ctx.send(embed=result_embed)
+async def r(ctx, gameName: str = None, tagLine: str = None):
+    if gameName is None and tagLine is None:
+        user_id = str(ctx.author.id)
+        
+        # Query the database for the user's data
+        user_data = collection.find_one({"discord_id": user_id})
+
+        if user_data:
+            # If user is linked, use stored data as name and tag
+            gameName = user_data['name']
+            tagLine = user_data['tag']
+            # Indicates that user has linked data
+            linked = True
+        else:
+            # If user isn't linked, inform the user
+            await ctx.send("You have not linked any data. Use `!link <name> <tag>` to link your account.")
+            linked = False
+    else: 
+        # Name and tag were typed as args, no need to check for link
+        args = True
+
+    if linked or args:
+        result = last_match(gameName, tagLine)
+        result_embed = discord.Embed(
+                        title=f"Last TFT Match Placements:",
+                        description=result,
+                        color=discord.Color.blue()
+                    )
+        await ctx.send(embed=result_embed)
 
 # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
 @bot.command()
@@ -209,10 +232,35 @@ async def commands(ctx):
                     **!stats** - Check ranked stats for a player
                     **!ping** - Test that bot is active
                     **!commands** - Get a list of all commands
+                    **!link** - Link discord account to riot account
                     """,
                     color=discord.Color.blue()
                 )
     await ctx.send(embed=commands_embed)
+
+# Command to link riot and discord accounts, stored in mongodb database
+@bot.command()
+async def link(ctx, name: str, tag: str):
+    user_id = str(ctx.author.id)
+    
+    # Check if the user already has linked data
+    existing_user = collection.find_one({"discord_id": user_id})
+    
+    if existing_user:
+        # If user already has data, update it
+        collection.update_one(
+            {"discord_id": user_id},
+            {"$set": {"name": name, "tag": tag}}
+        )
+        await ctx.send(f"Your data has been updated to: {name} {tag}")
+    else:
+        # If no data exists, insert a new document for the user
+        collection.insert_one({
+            "discord_id": user_id,
+            "name": tag,
+            "name": tag
+        })
+        await ctx.send(f"Your data has been linked: {name} {tag}")
     
 # Run the bot with your token
 bot.run(bot_token)
