@@ -176,6 +176,7 @@ async def bot_commands(ctx):
                     color=discord.Color.blue()
                 )
     await ctx.send(embed=commands_embed)
+    await ctx.send('testtestest')
     
 # Run the bot with your token
 bot.run(bot_token)
