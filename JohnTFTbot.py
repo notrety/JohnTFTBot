@@ -26,6 +26,19 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 mass_region = "americas"
 region = "na1"
 
+# Get Rank icons
+RANK_ICON_URLS = {
+    "IRON": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/iron.png",
+    "BRONZE": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/bronze.png",
+    "SILVER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/silver.png",
+    "GOLD": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/gold.png",
+    "PLATINUM": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/platinum.png",
+    "EMERALD": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/emerald.png",
+    "DIAMOND": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/diamond.png",
+    "MASTER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/master.png",
+    "GRANDMASTER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/grandmaster.png",
+    "CHALLENGER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/challenger.png"
+}
 # Initialize Riot API Wrapper
 tft_watcher = TftWatcher(riot_token)
 
@@ -40,10 +53,14 @@ def get_puuid(gameName, tagLine):
         return None
 
 # Function to get rank info
-def get_rank(gameName, tagLine):
+# Dictionary to store rank icons from GitHub
+
+
+def get_rank_embed(gameName, tagLine):
+    """Fetch TFT rank and return a Discord embed with a rank icon."""
     puuid = get_puuid(gameName, tagLine)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}."
+        return None, f"Could not find PUUID for {gameName}#{tagLine}."
 
     try:
         summoner = tft_watcher.summoner.by_puuid(region, puuid)
@@ -56,11 +73,26 @@ def get_rank(gameName, tagLine):
                 lp = entry['leaguePoints']
                 total_games = entry['wins'] + entry['losses']
                 top_four_rate = round(entry['wins'] / total_games * 100, 2) if total_games else 0
-                return f"**{gameName}#{tagLine}** - {tier} {rank} ({lp} LP) - **Top 4 Rate:** {top_four_rate}%"
-        
-        return f"{gameName}#{tagLine} has no ranked TFT games."
+
+                # Get rank icon URL from GitHub
+                rank_icon_url = RANK_ICON_URLS.get(tier.upper(), "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/" + rank + ".png")
+
+                # Create an embed message
+                embed = discord.Embed(
+                    title=f"TFT Stats for {gameName}#{tagLine}",
+                    description=f"🏆 **{tier} {rank}** ({lp} LP)\n🎯 **Top 4 Rate:** {top_four_rate}%\n📊 **Total Games:** {total_games}",
+                    color=discord.Color.blue()
+                )
+                embed.set_thumbnail(url=rank_icon_url)  # Set the rank icon
+                embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
+
+                return embed, None  # Return the embed
+    
+        return None, f"{gameName}#{tagLine} has no ranked TFT games."
+
     except Exception as err:
-        return f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+
 
 def last_match(gameName, tagLine):
     puuid = get_puuid(gameName, tagLine)
@@ -126,9 +158,14 @@ async def ping(ctx):
 @bot.command()
 async def stats(ctx, gameName: str, tagLine: str):
     """Fetch and display TFT rank stats for a player."""
-    result = get_rank(gameName, tagLine)
-    await ctx.send(result)
+    embed, error_message = get_rank_embed(gameName, tagLine)  # Unpack tuple
 
+    if error_message:
+        await ctx.send(error_message)  # Send error as text
+    else:
+        await ctx.send(embed=embed)  # Send embed
+
+# Command to fetch last match data
 @bot.command()
 async def rs(ctx, gameName: str, tagLine: str):
     result = last_match(gameName, tagLine)
