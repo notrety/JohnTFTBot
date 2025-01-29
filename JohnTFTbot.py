@@ -169,7 +169,7 @@ async def rs(ctx, gameName: str, tagLine: str):
 
 # Command to check all available commands
 @bot.command()
-async def commands(ctx):
+async def bot_commands(ctx): 
     commands_embed = discord.Embed(
                     title=f"Commands",
                     description=f"!rs - Command to fetch most recent match data\n!stats - Command to fetch ranked stats for a player\n!ping - Command to test that bot is active",
