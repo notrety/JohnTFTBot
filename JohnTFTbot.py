@@ -78,20 +78,35 @@ def last_match(gameName, tagLine):
         # Fetch match details
         match_info = tft_watcher.match.by_id(region, match_id)
 
+        players_data = []
+
         # Find player stats
         for participant in match_info['info']['participants']:
-            if participant['puuid'] == puuid:
-                placement = participant['placement']
-                level = participant['level']
-                total_damage_to_players = participant['total_damage_to_players']
-                return (
-                    f"**{gameName}#{tagLine}** - Last Match\n"
-                    f"🏆 **Placement:** {placement}\n"
-                    f"⭐ **Level:** {level}\n"
-                    f"🔥 **Damage Dealt:** {total_damage_to_players}"
-                )
+            player_puuid = participant['puuid']
+            placement = participant['placement']
 
-        return f"Could not find match data for {gameName}#{tagLine}."
+            # Fetch gameName and tagLine from PUUID
+            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
+            response = requests.get(riot_id_url)
+            riot_id_info = response.json()
+
+            if 'gameName' in riot_id_info and 'tagLine' in riot_id_info:
+                player_name = f"{riot_id_info['gameName']}#{riot_id_info['tagLine']}"
+            else:
+                player_name = "Unknown Player"
+
+            # Store placement & name
+            players_data.append((placement, player_name))
+
+                # Sort players by placement
+        players_data.sort()
+
+        # Format the message
+        result = "**Last TFT Match Placements:**\n"
+        for placement, name in players_data:
+            result += f"🏆 **{placement}** - {name}\n"
+
+        return result
     
     except Exception as err:
         return f"Error fetching last match for {gameName}#{tagLine}: {err}"
