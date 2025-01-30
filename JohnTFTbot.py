@@ -81,6 +81,42 @@ RANK_ICON_URLS = {
     "CHALLENGER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/challenger.png"
 }
 
+# Dictionary Converting Ranks to Elos
+rank_to_elo = {
+    "IRON IV": 0,
+    "IRON III": 100,
+    "IRON II": 200,
+    "IRON I": 300,
+    "BRONZE IV": 400,
+    "BRONZE III": 500,
+    "BRONZE II": 600,
+    "BRONZE I": 700,
+    "SILVER IV": 800,
+    "SILVER III": 900,
+    "SILVER II": 1000,
+    "SILVER I": 1100,
+    "GOLD IV": 1200,
+    "GOLD III": 1300,
+    "GOLD II": 1400,
+    "GOLD I": 1500,
+    "PLATINUM IV": 1600,
+    "PLATINUM III": 1700,
+    "PLATINUM II": 1800,
+    "PLATINUM I": 1900,
+    "EMERALD IV": 2000,
+    "EMERALD III": 2100,
+    "EMERALD II": 2200,
+    "EMERALD I": 2300,
+    "DIAMOND IV": 2400,
+    "DIAMOND III": 2500,
+    "DIAMOND II": 2600,
+    "DIAMOND I": 2700,
+    "MASTER I": 2800,
+    "GRANDMASTER I": 2800,
+    "CHALLENGER I": 2800
+}
+
+
 # Initialize Riot API Wrapper
 tft_watcher = TftWatcher(riot_token)
 
@@ -136,13 +172,13 @@ def get_rank_embed(gameName, tagLine):
 def last_match(gameName, tagLine):
     puuid = get_puuid(gameName, tagLine)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}."
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None
 
     try:
         # Fetch the latest match ID
         match_list = tft_watcher.match.by_puuid(region, puuid, count=1)
         if not match_list:
-            return f"No matches found for {gameName}#{tagLine}."
+            return f"No matches found for {gameName}#{tagLine}.", None
 
         match_id = match_list[0]  # Get the latest match ID
 
@@ -150,11 +186,27 @@ def last_match(gameName, tagLine):
         match_info = tft_watcher.match.by_id(region, match_id)
 
         players_data = []
+        
+        player_elos = 0
 
         # Find player stats
         for participant in match_info['info']['participants']:
             player_puuid = participant['puuid']
             placement = participant['placement']
+
+            # Check elos of all players to calculate average
+            summoner = tft_watcher.summoner.by_puuid(region, player_puuid)
+            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    tier = entry['tier']
+                    rank = entry['rank']
+                    tier_and_rank = tier + " " + rank
+                    lp = entry['leaguePoints']
+            
+            player_elos += rank_to_elo[tier_and_rank]
+            player_elos += int(lp)
 
             # Fetch gameName and tagLine from PUUID
             riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
@@ -169,9 +221,20 @@ def last_match(gameName, tagLine):
             # Store placement & name
             players_data.append((placement, player_name))
 
-                # Sort players by placement
+        # Sort players by placement
         players_data.sort()
 
+        # Calculate average lobby elo
+        avg_elo = player_elos / 8
+
+        # Find all keys for the value 2
+        keys = [key for key, val in rank_to_elo.items() if val > avg_elo]
+        avg_rank = ""
+        if rank_to_elo[keys[0]] > 2800:
+            #master+ lobby, see if avg is master gm or chall
+            None
+        else:
+            avg_rank = keys[0]
         # Format the message
         result = ""
         for placement, name in players_data:
@@ -187,10 +250,10 @@ def last_match(gameName, tagLine):
                 else:
                     result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
-        return result
+        return result, avg_rank
     
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}"
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None
 
 def custom_equal(str1, str2, chars_to_ignore):
     str1 = str1.lower().translate(str.maketrans('', '', chars_to_ignore))
@@ -225,48 +288,70 @@ async def ping(ctx):
 
 # Command to fetch TFT stats
 @bot.command()
-async def stats(ctx, gameName: str = None, tagLine: str = None):
+async def stats(ctx, *args):
     """Fetch and display TFT rank stats for a player."""
     data = False
-    if gameName is None and tagLine is None:
-        # No args present, check if account is linked
+    if len(args) == 2:  # Expecting name and tagline
+        gameName = args[0]
+        tagLine = args[1]
+        data = True
+    elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
+        mentioned_user = args[0]
+        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+        # Check if user is linked
+        data, gameName, tagLine = check_data(user_id)
+        if not data:
+            await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+    elif len(args) == 0: # Check for linked account by sender
         data, gameName, tagLine = check_data(ctx.author.id)
+        if not data:
+            await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
     else: 
-        # Name and tag were typed as args, no need to check for link
-        args = True
+        # User formatted command incorrectly, let them know
+        await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
-    if data or args:
+    if data:
         rank_embed, error_message = get_rank_embed(gameName, tagLine)  # Unpack tuple
 
         if error_message:
             await ctx.send(error_message)  # Send error as text
         else:
             await ctx.send(embed=rank_embed)  # Send embed
-    else:
-        await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
 
 
 # Command to fetch last match data
 @bot.command(name="r", aliases=["rs"])
-async def r(ctx, gameName: str = None, tagLine: str = None):
+async def r(ctx, *args):
+    """Display recent match data for a player."""
     data = False
-    if gameName is None and tagLine is None:
-        # No args present, check if account is linked
+    if len(args) == 2:  # Expecting name and tagline
+        gameName = args[0]
+        tagLine = args[1]
+        data = True
+    elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
+        mentioned_user = args[0]
+        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+        # Check if user is linked
+        data, gameName, tagLine = check_data(user_id)
+        if not data:
+            await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+    elif len(args) == 0: # Check for linked account by sender
         data, gameName, tagLine = check_data(ctx.author.id)
+        if not data:
+            await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
     else: 
-        # Name and tag were typed as args, no need to check for link
-        args = True
+        # User formatted command incorrectly, let them know
+        await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
-    if data or args:
-        result = last_match(gameName, tagLine)
+    if data:
+        result, avg_rank = last_match(gameName, tagLine)
         result_embed = discord.Embed(
                         title=f"Last TFT Match Placements:",
                         description=result,
                         color=discord.Color.blue()
                     )
+        result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
         await ctx.send(embed=result_embed)
-    else:
-        await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
 
 # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
 @bot.command()
