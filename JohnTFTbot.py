@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
 from PIL import Image
 from io import BytesIO
-
 uri = "mongodb+srv://sosafelix:lee2014kms2017@tfteamusers.deozh.mongodb.net/?retryWrites=true&w=majority&appName=TFTeamUsers"
 
 # Create a new client and connect to the server
@@ -29,29 +28,44 @@ load_dotenv()
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 riot_token = os.getenv("RIOT_API_TOKEN")
 
-# URL for the TFT traits JSON data from Community Dragon
-json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/tfttraits.json"
+json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
 
-# Fetch JSON data
 response = requests.get(json_url)
-
 if response.status_code == 200:
-    try:
-        print("JSON Parsed successfully")
-        trait_icon_mapping = response.json()  # Parse JSON safely
-    except ValueError:
-        print("Failed to parse JSON.")
-        trait_icon_mapping = []  # Default empty list
+    data = response.json()  # Assuming data is a dictionary
+    
+    # Access the 'sets' property
+    sets_data = data.get("sets", {})  # Get the 'sets' dictionary, default to empty if not found
+    
+    # Access the '13' property within 'sets'
+    set_13 = sets_data.get("13", {})  # Get the '13' property, default to empty dict if not found
+    
+    # Access the 'champions' list within '13'
+    champ_mapping = set_13.get("champions", [])  # Get the 'champions' list, default to empty list if not found
+    trait_icon_mapping = set_13.get("traits")
 else:
-    print(f"Failed to fetch JSON, status code: {response.status_code}")
-    trait_icon_mapping = []  # Default empty list
+    print("Failed to fetch data")
 
 # Function to get the trait icon path
 def get_trait_icon(traits_data, trait_id):
     for trait in traits_data:
-        if trait.get("trait_id") == trait_id:
-            return trait.get("icon_path")[43:] # Removes the beginning of the datadragon icon_path 
+        if trait.get("apiName") == trait_id:
+            print("Trait Found")
+            return trait.get("icon", "")[:-4] # Removes the beginning of the datadragon icon_path 
+    print("Trait not Found")
     return None  # Return None if the trait_id is not found
+
+def get_champ_icon(champs_data, characterName):
+    # Loop through each champion in the list
+    for champion in champs_data:        
+        # Check if the apiName matches the provided characterName
+        if champion.get("apiName") == characterName:
+            print("Champion Found")
+            # Assuming 'champion' dictionary contains a 'squareIcon' key with the icon path
+            return champion.get("tileIcon", "")[:-4]  # Remove the last 4 characters (usually file extension)
+    
+    print("Champion Not Found")
+    return None
 
 # Enable all necessary intents
 intents = discord.Intents.default()
@@ -421,8 +435,26 @@ async def link(ctx, name: str, tag: str):
             "tag": tag
         })
         await ctx.send(f"Your data has been linked: {name} {tag}")
+
+# Assuming champ_mapping and get_champ_icon are already defined
+@bot.command()
+async def champion(ctx, champion_name: str):
+    # Get the icon path for the champion
+    champ_icon_path = get_champ_icon(champ_mapping, champion_name).lower()
     
-# 
+    if champ_icon_path:
+        # Build the URL for the champion's icon
+        champion_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + champ_icon_path + ".png"
+        
+        # Create an embed with the image
+        embed = discord.Embed(title="Champion Icon")
+        embed.set_image(url=champion_url)
+        
+        # Send the embed
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send(f"Champion {champion_name} not found.")
+
 @bot.command()
 async def overlay(ctx, trait_name: str, style_name: str):
     
@@ -452,8 +484,8 @@ async def overlay(ctx, trait_name: str, style_name: str):
     cropped_atlas_section = atlas.crop((left, top, right, bottom))
 
     # Download the overlay icon from community dragon
-    icon_path = get_trait_icon(trait_icon_mapping, trait_name)
-    icon_url = "https://raw.communitydragon.org/latest/game/assets/ux/traiticons/" + icon_path.lower()
+    icon_path = get_trait_icon(trait_icon_mapping, trait_name).lower()
+    icon_url = "https://raw.communitydragon.org/latest/game/" + icon_path + ".png"
     icon_response = requests.get(icon_url)
     icon = Image.open(BytesIO(icon_response.content))
 
