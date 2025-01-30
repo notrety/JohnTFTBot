@@ -48,10 +48,9 @@ else:
 
 # Function to get the trait icon path
 def get_trait_icon(traits_data, trait_id):
-    """Finds the trait in the JSON data and returns its icon path."""
     for trait in traits_data:
         if trait.get("trait_id") == trait_id:
-            return trait.get("icon_path")[43:] # removes the beginning of the datadragon icon_path 
+            return trait.get("icon_path")[43:] # Removes the beginning of the datadragon icon_path 
     return None  # Return None if the trait_id is not found
 
 # Enable all necessary intents
@@ -66,20 +65,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Define regions
 mass_region = "americas"
 region = "na1"
-
-# Dictionary to store rank icons from GitHub
-RANK_ICON_URLS = {
-    "IRON": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/iron.png",
-    "BRONZE": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/bronze.png",
-    "SILVER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/silver.png",
-    "GOLD": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/gold.png",
-    "PLATINUM": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/platinum.png",
-    "EMERALD": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/emerald.png",
-    "DIAMOND": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/diamond.png",
-    "MASTER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/master.png",
-    "GRANDMASTER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/grandmaster.png",
-    "CHALLENGER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/challenger.png"
-}
 
 # Dictionary Converting Ranks to Elos
 rank_to_elo = {
@@ -160,8 +145,8 @@ def get_rank_embed(gameName, tagLine):
                 total_games = entry['wins'] + entry['losses']
                 top_four_rate = round(entry['wins'] / total_games * 100, 2) if total_games else 0
 
-                # Get rank icon URL from GitHub
-                rank_icon_url = RANK_ICON_URLS.get(tier.upper(), "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/" + rank + ".png")
+                # Get rank icon URL from Data Dragon github 
+                rank_icon_url = "https://raw.githubusercontent.com/InFinity54/LoL_DDragon/refs/heads/master/extras/tier/" + tier.lower() + ".png"
 
                 # Create an embed message
                 embed = discord.Embed(
@@ -568,35 +553,36 @@ async def link(ctx, name: str, tag: str):
         })
         await ctx.send(f"Your data has been linked: {name} {tag}")
     
-
+# 
 @bot.command()
 async def overlay(ctx, trait_name: str, style_name: str):
-    """Overlay a trait icon onto the main sprite image."""
     
-    # Download the base texture atlas (sprite)
+    # Download the trait texture 
     atlas_url = "https://raw.communitydragon.org/pbe/game/assets/ux/tft/tft_traits_texture_atlas.png"
     atlas_response = requests.get(atlas_url)
     atlas = Image.open(BytesIO(atlas_response.content))
+    
+    # Setting position of texture crop
     if (style_name == "kBronze"):
-        left = 0 + 49 * 3   # x-coordinate of the left edge
-        top = 3     # y-coordinate of the top edge
+        left = 0 + 49 * 3   
+        top = 3
     elif (style_name == "kSilver"):
-        left = 49 * 5   # x-coordinate of the left edge
-        top = 3     # y-coordinate of the top edge
+        left = 49 * 5
+        top = 3
     elif (style_name == "kGold"):
-        left = 49 * 7   # x-coordinate of the left edge
-        top = 3     # y-coordinate of the top edge
+        left = 49 * 7
+        top = 3
     elif (style_name == "kChromatic"):
-        left = 49 * 7  # x-coordinate of the left edge
-        top = 60     # y-coordinate of the top edge
+        left = 49 * 7
+        top = 60
     elif (style_name == "kUnique"):
-        left = 49 * 7    # x-coordinate of the left edge
-        top = 180     # y-coordinate of the top edge
+        left = 49 * 7
+        top = 180
     right = left + 52  # x-coordinate of the right edge
     bottom = top + 52  # y-coordinate of the bottom edge
     cropped_atlas_section = atlas.crop((left, top, right, bottom))
 
-    # Download the overlay icon (this should be a separate image)
+    # Download the overlay icon from community dragon
     icon_path = get_trait_icon(trait_icon_mapping, trait_name)
     icon_url = "https://raw.communitydragon.org/latest/game/assets/ux/traiticons/" + icon_path.lower()
     icon_response = requests.get(icon_url)
