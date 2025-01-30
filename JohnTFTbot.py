@@ -60,7 +60,7 @@ intents.members = True          # Enable server members intent
 intents.presences = True        # Enable presence intent
 
 # Create bot instance
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True)
 
 # Define regions
 mass_region = "americas"
@@ -124,11 +124,11 @@ def get_puuid(gameName, tagLine):
         player_info = resp.json()
         return player_info.get('puuid')
     except Exception as err:
+        print("Failed to retrieve PUUID for {gameName}#{tagLine}.")
         return None
 
-# Function to get rank info
+# Function to get rank info from puuid and return embed with rank icon
 def get_rank_embed(gameName, tagLine):
-    """Fetch TFT rank and return a Discord embed with a rank icon."""
     puuid = get_puuid(gameName, tagLine)
     if not puuid:
         return None, f"Could not find PUUID for {gameName}#{tagLine}."
@@ -300,9 +300,8 @@ async def ping(ctx):
     await ctx.send('Lima Oscar Lima!')
 
 # Command to fetch TFT stats
-@bot.command(name="stats", aliases=["stast", "s", "STATS", "S", "tft", "TFT"])
+@bot.command(name="stats", aliases=["stast", "s", "tft"])
 async def stats(ctx, *args):
-    """Fetch and display TFT rank stats for a player."""
     data = False
     if len(args) == 2:  # Expecting name and tagline
         gameName = args[0]
@@ -332,10 +331,20 @@ async def stats(ctx, *args):
             await ctx.send(embed=rank_embed)  # Send embed
 
 
-# Command to fetch last ranked match data
-@bot.command(name="r", aliases=["rs", "R", "recent", "RS", "RECENT", "rr", "RR"])
+# Command to fetch last match data
+@bot.command(name="r", aliases=["rs","recent","rr","rn","rh","rd","rg"])
 async def r(ctx, *args):
-    """Display recent ranked match data for a player."""
+    if ctx.invoked_with == "rn":
+        game_type = "Normal"
+    elif ctx.invoked_with == "rg":
+        game_type = "Gamemode"
+    elif ctx.invoked_with == "rh":
+        game_type = "Hyper Roll"
+    elif ctx.invoked_with == "rd":
+        game_type = "Double Up"
+    else:
+        game_type = "Ranked"
+
     data = False
     if len(args) == 2:  # Expecting name and tagline
         gameName = args[0]
@@ -357,149 +366,9 @@ async def r(ctx, *args):
         await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
     if data:
-        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, "Ranked")
+        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, game_type)
         result_embed = discord.Embed(
-                        title=f"Recent Ranked TFT Match Placements:",
-                        description=result,
-                        color=discord.Color.blue()
-                    )
-        if master_plus_lp == 0:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
-        else:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-        await ctx.send(embed=result_embed)
-    
-@bot.command(name="rn", aliases=["RN"])
-async def rn(ctx, *args):
-    data = False
-    if len(args) == 2:  # Expecting name and tagline
-        gameName = args[0]
-        tagLine = args[1]
-        data = True
-    elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-        mentioned_user = args[0]
-        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-        # Check if user is linked
-        data, gameName, tagLine = check_data(user_id)
-        if not data:
-            await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-    elif len(args) == 0: # Check for linked account by sender
-        data, gameName, tagLine = check_data(ctx.author.id)
-        if not data:
-            await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
-    else: 
-        # User formatted command incorrectly, let them know
-        await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
-
-    if data:
-        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, "Normal")
-        result_embed = discord.Embed(
-                        title=f"Recent Normal TFT Match Placements:",
-                        description=result,
-                        color=discord.Color.blue()
-                    )
-        if master_plus_lp == 0:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
-        else:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-        await ctx.send(embed=result_embed)
-
-@bot.command(name="rh", aliases=["RH"])
-async def rn(ctx, *args):
-    data = False
-    if len(args) == 2:  # Expecting name and tagline
-        gameName = args[0]
-        tagLine = args[1]
-        data = True
-    elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-        mentioned_user = args[0]
-        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-        # Check if user is linked
-        data, gameName, tagLine = check_data(user_id)
-        if not data:
-            await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-    elif len(args) == 0: # Check for linked account by sender
-        data, gameName, tagLine = check_data(ctx.author.id)
-        if not data:
-            await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
-    else: 
-        # User formatted command incorrectly, let them know
-        await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
-
-    if data:
-        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, "Hyper Roll")
-        result_embed = discord.Embed(
-                        title=f"Recent Hyper Roll TFT Match Placements:",
-                        description=result,
-                        color=discord.Color.blue()
-                    )
-        if master_plus_lp == 0:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
-        else:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-        await ctx.send(embed=result_embed)
-
-@bot.command(name="rd", aliases=["RD"])
-async def rn(ctx, *args):
-    data = False
-    if len(args) == 2:  # Expecting name and tagline
-        gameName = args[0]
-        tagLine = args[1]
-        data = True
-    elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-        mentioned_user = args[0]
-        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-        # Check if user is linked
-        data, gameName, tagLine = check_data(user_id)
-        if not data:
-            await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-    elif len(args) == 0: # Check for linked account by sender
-        data, gameName, tagLine = check_data(ctx.author.id)
-        if not data:
-            await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
-    else: 
-        # User formatted command incorrectly, let them know
-        await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
-
-    if data:
-        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, "Double Up")
-        result_embed = discord.Embed(
-                        title=f"Recent Double Up TFT Match Placements:",
-                        description=result,
-                        color=discord.Color.blue()
-                    )
-        if master_plus_lp == 0:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
-        else:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-        await ctx.send(embed=result_embed)
-
-@bot.command(name="rg", aliases=["RG"])
-async def rg(ctx, *args):
-    data = False
-    if len(args) == 2:  # Expecting name and tagline
-        gameName = args[0]
-        tagLine = args[1]
-        data = True
-    elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-        mentioned_user = args[0]
-        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-        # Check if user is linked
-        data, gameName, tagLine = check_data(user_id)
-        if not data:
-            await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-    elif len(args) == 0: # Check for linked account by sender
-        data, gameName, tagLine = check_data(ctx.author.id)
-        if not data:
-            await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
-    else: 
-        # User formatted command incorrectly, let them know
-        await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
-
-    if data:
-        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, "GameMode")
-        result_embed = discord.Embed(
-                        title=f"Recent Game Mode TFT Match Placements:",
+                        title=f"Recent {game_type} TFT Match Placements:",
                         description=result,
                         color=discord.Color.blue()
                     )
