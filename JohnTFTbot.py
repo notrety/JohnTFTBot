@@ -148,15 +148,27 @@ def last_match(gameName, tagLine):
         # Format the message
         result = ""
         for placement, name in players_data:
-            if placement != 8:
-                result += f"🏆 **{placement}** - {name}\n"
+            full_name = gameName + "#" + tagLine
+            if custom_equal(full_name, name, "_ "):
+                if placement != 8:
+                    result += f"🏆 **{placement}** - **__{name}__**\n"
+                else:
+                    result += f"<:rety:1229135551714824354> **{placement}** - **__{name}__**\n"
             else:
-                result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
+                if placement != 8:
+                    result += f"🏆 **{placement}** - {name}\n"
+                else:
+                    result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
         return result
     
     except Exception as err:
         return f"Error fetching last match for {gameName}#{tagLine}: {err}"
+
+def custom_equal(str1, str2, chars_to_ignore):
+    str1 = str1.lower().translate(str.maketrans('', '', chars_to_ignore))
+    str2 = str2.lower().translate(str.maketrans('', '', chars_to_ignore))
+    return str1 == str2
 
 def check_data(id):
     user_id = str(id)
@@ -188,6 +200,7 @@ async def ping(ctx):
 @bot.command()
 async def stats(ctx, gameName: str = None, tagLine: str = None):
     """Fetch and display TFT rank stats for a player."""
+    data = False
     if gameName is None and tagLine is None:
         # No args present, check if account is linked
         data, gameName, tagLine = check_data(ctx.author.id)
@@ -209,6 +222,7 @@ async def stats(ctx, gameName: str = None, tagLine: str = None):
 # Command to fetch last match data
 @bot.command(name="r", aliases=["rs"])
 async def r(ctx, gameName: str = None, tagLine: str = None):
+    data = False
     if gameName is None and tagLine is None:
         # No args present, check if account is linked
         data, gameName, tagLine = check_data(ctx.author.id)
