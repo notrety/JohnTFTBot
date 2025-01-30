@@ -6,7 +6,10 @@ from discord.ext import commands
 from riotwatcher import TftWatcher
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
+from PIL import Image, ImageDraw
+from io import BytesIO
 
+'''
 uri = "mongodb+srv://sosafelix:lee2014kms2017@tfteamusers.deozh.mongodb.net/?retryWrites=true&w=majority&appName=TFTeamUsers"
 
 # Create a new client and connect to the server
@@ -18,7 +21,7 @@ try:
     print("Pinged your deployment. You successfully connected to MongoDB!")
 except Exception as e:
     print(e)
-
+'''
 # Load the .env file
 load_dotenv()
 
@@ -121,11 +124,14 @@ def last_match(gameName, tagLine):
         match_info = tft_watcher.match.by_id(region, match_id)
 
         players_data = []
+        embed = discord.Embed(title=f"Last Match for {gameName}#{tagLine}", color=0x00ff00)
 
         # Find player stats
         for participant in match_info['info']['participants']:
             player_puuid = participant['puuid']
             placement = participant['placement']
+            player_game_name = participant['riotIdGameName']
+            embed.add_field(name=f"{player_game_name} - Traits", value="Active Traits:", inline=False)
 
             # Fetch gameName and tagLine from PUUID
             riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
@@ -178,19 +184,8 @@ async def stats(ctx, gameName: str, tagLine: str):
         await ctx.send(embed=rank_embed)  # Send embed
 
 # Command to fetch last match data
-@bot.command()
+@bot.command(name="rs", aliases=["r"])
 async def rs(ctx, gameName: str, tagLine: str):
-    result = last_match(gameName, tagLine)
-    result_embed = discord.Embed(
-                    title=f"Last TFT Match Placements:",
-                    description=result,
-                    color=discord.Color.blue()
-                )
-    await ctx.send(embed=result_embed)
-
-# Same as rs
-@bot.command()
-async def r(ctx, gameName: str, tagLine: str):
     result = last_match(gameName, tagLine)
     result_embed = discord.Embed(
                     title=f"Last TFT Match Placements:",
@@ -203,16 +198,55 @@ async def r(ctx, gameName: str, tagLine: str):
 @bot.command()
 async def commands(ctx): 
     commands_embed = discord.Embed(
-                    title=f"Commands List",
-                    description=f"""
-                    **!rs / !r** - Fetch most recent match data
-                    **!stats** - Check ranked stats for a player
-                    **!ping** - Test that bot is active
-                    **!commands** - Get a list of all commands
-                    """,
-                    color=discord.Color.blue()
-                )
+        title=f"Commands List",
+        description=f"""
+        **!rs / !r** - Fetch most recent match data
+        **!stats** - Check ranked stats for a player
+        **!ping** - Test that bot is active
+        **!commands** - Get a list of all commands
+        """,
+        color=discord.Color.blue()
+        )
     await ctx.send(embed=commands_embed)
+
+@bot.command()
+async def overlay(ctx, trait_name: str):
+    """Overlay a trait icon onto the main sprite image."""
     
+    # Download the base texture atlas (sprite)
+    atlas_url = "https://raw.communitydragon.org/pbe/game/assets/ux/tft/tft_traits_texture_atlas.png"
+    atlas_response = requests.get(atlas_url)
+    atlas = Image.open(BytesIO(atlas_response.content))
+    left = 0 + 294    # x-coordinate of the left edge
+    top = 3     # y-coordinate of the top edge
+    right = left + 52  # x-coordinate of the right edge
+    bottom = top + 52  # y-coordinate of the bottom edge
+
+    cropped_atlas_section = atlas.crop((left, top, right, bottom))
+
+    # Download the overlay icon (this should be a separate image)
+    icon_url = f"https://raw.communitydragon.org/latest/game/assets/ux/traiticons/trait_icon_" + trait_name +".png"  # Replace with actual URLs
+    icon_response = requests.get(icon_url)
+    icon = Image.open(BytesIO(icon_response.content))
+
+    # Resize the icon to fit the 32x32 section (optional)
+    icon_resized = icon.resize((32, 32), Image.LANCZOS)
+
+    # Paste the icon onto the cropped section of the atlas
+    cropped_atlas_section.paste(icon_resized, (10, 10), icon_resized)  # Pasting icon in the top-left corner of the cropped area
+
+    # Resize the final image to 50x50
+    final_image = cropped_atlas_section.resize((200, 200), Image.LANCZOS)
+
+    # Save or use in Discord
+    final_image.save("final_trait_overlay.png")
+
+    # Send the final image as an embed
+    file = discord.File("final_trait_overlay.png", filename="trait.png")
+    embed = discord.Embed(title="Trait Icon Overlay")
+    embed.set_image(url="attachment://trait.png")
+    await ctx.send(embed=embed, file=file)
+
+
 # Run the bot with your token
 bot.run(bot_token)
