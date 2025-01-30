@@ -111,9 +111,9 @@ rank_to_elo = {
     "DIAMOND III": 2500,
     "DIAMOND II": 2600,
     "DIAMOND I": 2700,
-    "MASTER I": 2800,
+    "MASTER I": 2800, 
     "GRANDMASTER I": 2800,
-    "CHALLENGER I": 2800
+    "CHALLENGER I": 2800,
 }
 
 
@@ -172,13 +172,13 @@ def get_rank_embed(gameName, tagLine):
 def last_match(gameName, tagLine):
     puuid = get_puuid(gameName, tagLine)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None, 0
 
     try:
         # Fetch the latest match ID
         match_list = tft_watcher.match.by_puuid(region, puuid, count=1)
         if not match_list:
-            return f"No matches found for {gameName}#{tagLine}.", None
+            return f"No matches found for {gameName}#{tagLine}.", None, 0
 
         match_id = match_list[0]  # Get the latest match ID
 
@@ -226,14 +226,15 @@ def last_match(gameName, tagLine):
 
         # Calculate average lobby elo
         avg_elo = player_elos / 8
-
-        # Find all keys for the value 2
-        keys = [key for key, val in rank_to_elo.items() if val > avg_elo]
+        master_plus_lp = 0 
         avg_rank = ""
-        if rank_to_elo[keys[0]] > 2800:
-            #master+ lobby, see if avg is master gm or chall
-            None
+        # Find all keys greater than value
+        if avg_elo > 2800:
+            #master+ lobby, return average lp instead
+            avg_rank = "Master+"
+            master_plus_lp = int(round(avg_elo - 2800))
         else:
+            keys = [key for key, val in rank_to_elo.items() if val > avg_elo]
             avg_rank = keys[0]
         # Format the message
         result = ""
@@ -250,10 +251,10 @@ def last_match(gameName, tagLine):
                 else:
                     result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
-        return result, avg_rank
+        return result, avg_rank, master_plus_lp
     
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, 0
 
 def custom_equal(str1, str2, chars_to_ignore):
     str1 = str1.lower().translate(str.maketrans('', '', chars_to_ignore))
@@ -344,13 +345,16 @@ async def r(ctx, *args):
         await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
     if data:
-        result, avg_rank = last_match(gameName, tagLine)
+        result, avg_rank, master_plus_lp = last_match(gameName, tagLine)
         result_embed = discord.Embed(
                         title=f"Last TFT Match Placements:",
                         description=result,
                         color=discord.Color.blue()
                     )
-        result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
+        if master_plus_lp == 0:
+            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
+        else:
+            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
         await ctx.send(embed=result_embed)
 
 # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
