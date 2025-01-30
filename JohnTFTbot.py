@@ -1,11 +1,12 @@
 import discord
-import pandas as pd
 import requests
 import os
 from discord.ext import commands
 from riotwatcher import TftWatcher
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
+from PIL import Image
+from io import BytesIO
 
 uri = "mongodb+srv://sosafelix:lee2014kms2017@tfteamusers.deozh.mongodb.net/?retryWrites=true&w=majority&appName=TFTeamUsers"
 
@@ -27,6 +28,31 @@ load_dotenv()
 # Get the token
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 riot_token = os.getenv("RIOT_API_TOKEN")
+
+# URL for the TFT traits JSON data from Community Dragon
+json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/tfttraits.json"
+
+# Fetch JSON data
+response = requests.get(json_url)
+
+if response.status_code == 200:
+    try:
+        print("JSON Parsed successfully")
+        trait_icon_mapping = response.json()  # Parse JSON safely
+    except ValueError:
+        print("Failed to parse JSON.")
+        trait_icon_mapping = []  # Default empty list
+else:
+    print(f"Failed to fetch JSON, status code: {response.status_code}")
+    trait_icon_mapping = []  # Default empty list
+
+# Function to get the trait icon path
+def get_trait_icon(traits_data, trait_id):
+    """Finds the trait in the JSON data and returns its icon path."""
+    for trait in traits_data:
+        if trait.get("trait_id") == trait_id:
+            return trait.get("icon_path")[43:] # removes the beginning of the datadragon icon_path 
+    return None  # Return None if the trait_id is not found
 
 # Enable all necessary intents
 intents = discord.Intents.default()
@@ -54,6 +80,7 @@ RANK_ICON_URLS = {
     "GRANDMASTER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/grandmaster.png",
     "CHALLENGER": "https://raw.githubusercontent.com/notrety/JohnTFTbot/main/ranked_emblems/challenger.png"
 }
+
 # Initialize Riot API Wrapper
 tft_watcher = TftWatcher(riot_token)
 
@@ -281,5 +308,66 @@ async def link(ctx, name: str, tag: str):
         })
         await ctx.send(f"Your data has been linked: {name} {tag}")
     
+
+@bot.command()
+async def overlay(ctx, trait_name: str, style_name: str):
+    """Overlay a trait icon onto the main sprite image."""
+    
+    # Download the base texture atlas (sprite)
+    atlas_url = "https://raw.communitydragon.org/pbe/game/assets/ux/tft/tft_traits_texture_atlas.png"
+    atlas_response = requests.get(atlas_url)
+    atlas = Image.open(BytesIO(atlas_response.content))
+    if (style_name == "kBronze"):
+        left = 0 + 49 * 3   # x-coordinate of the left edge
+        top = 3     # y-coordinate of the top edge
+    elif (style_name == "kSilver"):
+        left = 49 * 5   # x-coordinate of the left edge
+        top = 3     # y-coordinate of the top edge
+    elif (style_name == "kGold"):
+        left = 49 * 7   # x-coordinate of the left edge
+        top = 3     # y-coordinate of the top edge
+    elif (style_name == "kChromatic"):
+        left = 49 * 7  # x-coordinate of the left edge
+        top = 60     # y-coordinate of the top edge
+    elif (style_name == "kUnique"):
+        left = 49 * 7    # x-coordinate of the left edge
+        top = 180     # y-coordinate of the top edge
+    right = left + 52  # x-coordinate of the right edge
+    bottom = top + 52  # y-coordinate of the bottom edge
+    cropped_atlas_section = atlas.crop((left, top, right, bottom))
+
+    # Download the overlay icon (this should be a separate image)
+    icon_path = get_trait_icon(trait_icon_mapping, trait_name)
+    icon_url = "https://raw.communitydragon.org/latest/game/assets/ux/traiticons/" + icon_path.lower()
+    icon_response = requests.get(icon_url)
+    icon = Image.open(BytesIO(icon_response.content))
+
+    # Converting icon color from white to black for visibility
+    icon = icon.convert("RGBA")
+    pixels = icon.load()
+    for i in range(icon.width):
+        for j in range(icon.height):
+            r, g, b, a = pixels[i, j]
+            if r > 200 and g > 200 and b > 200:  # If the pixel is white
+                pixels[i, j] = (0, 0, 0, a)  # Change it to black (retain transparency)
+
+    # Resize the icon to fit the 32x32 section (optional)
+    icon_resized = icon.resize((32, 32), Image.LANCZOS)
+
+    # Paste the icon onto the cropped section of the atlas
+    cropped_atlas_section.paste(icon_resized, (10, 10), icon_resized)  # Pasting icon in the top-left corner of the cropped area
+
+    # Resize the final image to 50x50
+    final_image = cropped_atlas_section.resize((200, 200), Image.LANCZOS)
+
+    # Save or use in Discord
+    final_image.save("final_trait_overlay.png")
+
+    # Send the final image as an embed
+    file = discord.File("final_trait_overlay.png", filename="trait.png")
+    embed = discord.Embed(title="Trait Icon Overlay")
+    embed.set_image(url="attachment://trait.png")
+    await ctx.send(embed=embed, file=file)
+
 # Run the bot with your token
 bot.run(bot_token)
