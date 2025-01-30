@@ -1,12 +1,11 @@
 import discord
 import requests
 import os
-import re
 from discord.ext import commands
 from riotwatcher import TftWatcher
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
-from PIL import Image, ImageDraw
+from PIL import Image
 from io import BytesIO
 
 '''
@@ -268,6 +267,15 @@ async def overlay(ctx, trait_name: str, style_name: str):
     icon_response = requests.get(icon_url)
     icon = Image.open(BytesIO(icon_response.content))
 
+    # Converting icon color from white to black for visibility
+    icon = icon.convert("RGBA")
+    pixels = icon.load()
+    for i in range(icon.width):
+        for j in range(icon.height):
+            r, g, b, a = pixels[i, j]
+            if r > 200 and g > 200 and b > 200:  # If the pixel is white
+                pixels[i, j] = (0, 0, 0, a)  # Change it to black (retain transparency)
+
     # Resize the icon to fit the 32x32 section (optional)
     icon_resized = icon.resize((32, 32), Image.LANCZOS)
 
@@ -285,7 +293,6 @@ async def overlay(ctx, trait_name: str, style_name: str):
     embed = discord.Embed(title="Trait Icon Overlay")
     embed.set_image(url="attachment://trait.png")
     await ctx.send(embed=embed, file=file)
-
 
 # Run the bot with your token
 bot.run(bot_token)
