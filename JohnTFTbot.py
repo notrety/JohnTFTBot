@@ -455,7 +455,7 @@ async def link(ctx, name: str, tag: str):
 
 # Command to get champion icon
 @bot.command()
-async def champion(ctx, champion_name: str, tier: int = 0, *items):
+async def champion(ctx, champion_name: str, tier: int = 0, rarity: int = 1, *items):
     # Get the icon path for the champion
     champ_icon_path = get_champ_icon(champ_mapping, champion_name).lower()
     
@@ -465,13 +465,20 @@ async def champion(ctx, champion_name: str, tier: int = 0, *items):
         champion_response = requests.get(champion_url)
         icon = Image.open(BytesIO(champion_response.content)).convert("RGBA")
         icon_resized = icon.resize((64,64), Image.LANCZOS)
-        new_image = Image.new("RGBA", (64, 101), (0, 0, 0, 0))
-        new_image.paste(icon_resized, (0, 16), icon_resized)
+
+        rarity_url = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier" + str(rarity) + ".png"
+        rarity_response = requests.get(rarity_url)
+        rarity_border = Image.open(BytesIO(rarity_response.content)).convert("RGBA")
+        rarity_resized = rarity_border.resize((72,72), Image.LANCZOS)
+        new_image = Image.new("RGBA", (72, 140), (0, 0, 0, 0))
+        new_image.paste(rarity_resized, (0,25), rarity_resized)
+        new_image.paste(icon_resized, (4, 29), icon_resized)
         if(tier == 2 or tier == 3):
             tier_icon_path = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-" + str(tier) + ".png"
             tier_reponse = requests.get(tier_icon_path)
             tier_icon = Image.open(BytesIO(tier_reponse.content)).convert("RGBA")
-            new_image.paste(tier_icon, (0,0), tier_icon)
+            tier_resized = tier_icon.resize((72,36), Image.LANCZOS)
+            new_image.paste(tier_resized, (0,0), tier_resized)
         # Create an embed with the image
         n = len(items)
         for i in range(n):
@@ -479,9 +486,8 @@ async def champion(ctx, champion_name: str, tier: int = 0, *items):
             item_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + item_icon_path
             item_response = requests.get(item_url)
             item_icon = Image.open(BytesIO(item_response.content)).convert("RGBA")
-            item_resized = item_icon.resize((21,21), Image.LANCZOS)
-            new_image.paste(item_resized, (21*i,80), item_resized)
-
+            item_resized = item_icon.resize((23,23), Image.LANCZOS)
+            new_image.paste(item_resized, (1 + 23*i,97), item_resized)
 
         embed = discord.Embed(title="Champion Icon")
         new_image.save("champ_overlay.png")
