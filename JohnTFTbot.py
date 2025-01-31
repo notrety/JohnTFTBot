@@ -145,6 +145,15 @@ game_type_to_id = {
     "GameMode": 1165
 }
 
+style_to_texture = {
+    0: "",
+    1: "bronze-hover",
+    2: "silver-hover",
+    3: "unique-hover",
+    4: "gold-1",
+    5: "chromatic"
+}
+
 # Initialize Riot API Wrapper
 tft_watcher = TftWatcher(riot_token)
 
@@ -502,36 +511,17 @@ async def champion(ctx, champion_name: str, tier: int = 0, rarity: int = 1, *ite
 
 # Command to get trait icon with texture NEED TO UPDATE WITH NEW TEXTURE PATHS
 @bot.command()
-async def overlay(ctx, trait_name: str, style_name: str):
+async def overlay(ctx, trait_name: str, style: int):
     
     # Download the trait texture 
-    atlas_url = "https://raw.communitydragon.org/pbe/game/assets/ux/tft/tft_traits_texture_atlas.png"
-    atlas_response = requests.get(atlas_url)
-    atlas = Image.open(BytesIO(atlas_response.content))
-    
-    # Setting position of texture crop
-    if (style_name == "kBronze"):
-        left = 0 + 49 * 3   
-        top = 3
-    elif (style_name == "kSilver"):
-        left = 49 * 5
-        top = 3
-    elif (style_name == "kGold"):
-        left = 49 * 7
-        top = 3
-    elif (style_name == "kChromatic"):
-        left = 49 * 7
-        top = 60
-    elif (style_name == "kUnique"):
-        left = 49 * 7
-        top = 180
-    right = left + 52  # x-coordinate of the right edge
-    bottom = top + 52  # y-coordinate of the bottom edge
-    cropped_atlas_section = atlas.crop((left, top, right, bottom))
+    texture_url = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/" + style_to_texture[style] + ".png"
+    texture_response = requests.get(texture_url)
+    texture = Image.open(BytesIO(texture_response.content))
 
     # Download the overlay icon from community dragon
     icon_path = get_trait_icon(trait_icon_mapping, trait_name).lower()
     icon_url = "https://raw.communitydragon.org/latest/game/" + icon_path + ".png"
+    print(icon_url)
     icon_response = requests.get(icon_url)
     icon = Image.open(BytesIO(icon_response.content))
 
@@ -544,17 +534,13 @@ async def overlay(ctx, trait_name: str, style_name: str):
             if r > 200 and g > 200 and b > 200:  # If the pixel is white
                 pixels[i, j] = (0, 0, 0, a)  # Change it to black (retain transparency)
 
-    # Resize the icon to fit the 32x32 section (optional)
-    icon_resized = icon.resize((32, 32), Image.LANCZOS)
+    icon_resized = icon.resize((64,64), Image.LANCZOS)
 
     # Paste the icon onto the cropped section of the atlas
-    cropped_atlas_section.paste(icon_resized, (10, 10), icon_resized)  # Pasting icon in the top-left corner of the cropped area
-
-    # Resize the final image to 50x50
-    final_image = cropped_atlas_section.resize((200, 200), Image.LANCZOS)
+    texture.paste(icon_resized, (12, 18), icon_resized)  # Pasting icon in the top-left corner of the cropped area
 
     # Save or use in Discord
-    final_image.save("final_trait_overlay.png")
+    texture.save("final_trait_overlay.png")
 
     # Send the final image as an embed
     file = discord.File("final_trait_overlay.png", filename="trait.png")
