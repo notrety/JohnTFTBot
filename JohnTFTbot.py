@@ -41,13 +41,14 @@ if response.status_code == 200:
     # Access the '13' property within 'sets'
     set_13 = sets_data.get("13", {})  # Get the '13' property, default to empty dict if not found
     
-    # Access the 'champions' list within '13'
+    # Access the 'champions' and 'traits' lists within '13'
     champ_mapping = set_13.get("champions", [])  # Get the 'champions' list, default to empty list if not found
-    trait_icon_mapping = set_13.get("traits")
+    trait_icon_mapping = set_13.get("traits", []) # Get the 'traits' list, default to empty list if not found
     print("Traits and Champions parsed successfully")
 else:
     print("Failed to fetch data")
 
+# Setting item mapping based on item json
 response = requests.get(item_json_url)
 if response.status_code == 200:
     item_mapping = response.json()  # Assuming data is a dictionary
@@ -361,7 +362,6 @@ async def stats(ctx, *args):
         else:
             await ctx.send(embed=rank_embed)  # Send embed
 
-
 # Command to fetch last match data
 @bot.command(name="r", aliases=["rs","recent","rr","rn","rh","rd","rg"])
 async def r(ctx, *args):
@@ -453,25 +453,38 @@ async def link(ctx, name: str, tag: str):
         })
         await ctx.send(f"Your data has been linked: {name} {tag}")
 
-# Assuming champ_mapping and get_champ_icon are already defined
+# Command to get champion icon
 @bot.command()
-async def champion(ctx, champion_name: str):
+async def champion(ctx, champion_name: str, tier: int = 0):
     # Get the icon path for the champion
     champ_icon_path = get_champ_icon(champ_mapping, champion_name).lower()
     
     if champ_icon_path:
         # Build the URL for the champion's icon
-        champion_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + champ_icon_path + ".png"
-        
+        champion_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + champ_icon_path + ".png" 
+        champion_response = requests.get(champion_url)
+        icon = Image.open(BytesIO(champion_response.content)).convert("RGBA")
+        icon_resized = icon.resize((64,64), Image.LANCZOS)
+        new_image = Image.new("RGBA", (64, 80), (0, 0, 0, 0))
+        new_image.paste(icon_resized, (0, 0), icon_resized)
+        if(tier == 2 or tier == 3):
+            tier_icon_path = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-" + str(tier) + ".png"
+            tier_reponse = requests.get(tier_icon_path)
+            tier_icon = Image.open(BytesIO(tier_reponse.content)).convert("RGBA")
+            new_image.paste(tier_icon, (0,48), tier_icon)
         # Create an embed with the image
         embed = discord.Embed(title="Champion Icon")
-        embed.set_image(url=champion_url)
-        
-        # Send the embed
-        await ctx.send(embed=embed)
+        new_image.save("champ_overlay.png")
+
+        # Send the final image as an embed
+        file = discord.File("champ_overlay.png", filename="champ.png")
+        embed = discord.Embed(title="Champ Icon Overlay")
+        embed.set_image(url="attachment://champ.png")
+        await ctx.send(embed=embed, file=file)
     else:
         await ctx.send(f"Champion {champion_name} not found.")
 
+# Command to get trait icon with texture NEED TO UPDATE
 @bot.command()
 async def overlay(ctx, trait_name: str, style_name: str):
     
@@ -533,6 +546,7 @@ async def overlay(ctx, trait_name: str, style_name: str):
     embed.set_image(url="attachment://trait.png")
     await ctx.send(embed=embed, file=file)
 
+# Command to get item icon
 @bot.command()
 async def item(ctx, item_name: str):
         item_icon_path = get_item_icon(item_mapping, item_name).lower()
@@ -547,8 +561,7 @@ async def item(ctx, item_name: str):
             # Send the embed
             await ctx.send(embed=embed)
         else:
-            await ctx.send(f"Champion {item_name} not found.")
-
+            await ctx.send(f"Item {item_name} not found.")
 
 # Run the bot with your token
 bot.run(bot_token)
