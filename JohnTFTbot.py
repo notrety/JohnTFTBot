@@ -29,6 +29,7 @@ bot_token = os.getenv("DISCORD_BOT_TOKEN")
 riot_token = os.getenv("RIOT_API_TOKEN")
 
 json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
+item_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/tftitems.json"
 
 response = requests.get(json_url)
 if response.status_code == 200:
@@ -43,13 +44,21 @@ if response.status_code == 200:
     # Access the 'champions' list within '13'
     champ_mapping = set_13.get("champions", [])  # Get the 'champions' list, default to empty list if not found
     trait_icon_mapping = set_13.get("traits")
+    print("Traits and Champions parsed successfully")
+else:
+    print("Failed to fetch data")
+
+response = requests.get(item_json_url)
+if response.status_code == 200:
+    item_mapping = response.json()  # Assuming data is a dictionary
+    print("Items parsed successfully")
 else:
     print("Failed to fetch data")
 
 # Function to get the trait icon path
-def get_trait_icon(traits_data, trait_id):
+def get_trait_icon(traits_data, traitName):
     for trait in traits_data:
-        if trait.get("apiName") == trait_id:
+        if trait.get("apiName") == traitName:
             print("Trait Found")
             return trait.get("icon", "")[:-4] # Removes the beginning of the datadragon icon_path 
     print("Trait not Found")
@@ -65,6 +74,14 @@ def get_champ_icon(champs_data, characterName):
             return champion.get("tileIcon", "")[:-4]  # Remove the last 4 characters (usually file extension)
     
     print("Champion Not Found")
+    return None
+
+def get_item_icon(items_data, itemName):
+    for item in items_data:
+            if item.get("nameId") == itemName:
+                print("Item Found")
+                return item.get("squareIconPath", "")[21:]
+    print("Item Not Found")
     return None
 
 # Enable all necessary intents
@@ -515,6 +532,23 @@ async def overlay(ctx, trait_name: str, style_name: str):
     embed = discord.Embed(title="Trait Icon Overlay")
     embed.set_image(url="attachment://trait.png")
     await ctx.send(embed=embed, file=file)
+
+@bot.command()
+async def item(ctx, item_name: str):
+        item_icon_path = get_item_icon(item_mapping, item_name).lower()
+        if item_icon_path:
+            # Build the URL for the item's icon
+            item_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + item_icon_path
+            print(item_url)
+            # Create an embed with the image
+            embed = discord.Embed(title="Item Icon")
+            embed.set_image(url=item_url)
+            
+            # Send the embed
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(f"Champion {item_name} not found.")
+
 
 # Run the bot with your token
 bot.run(bot_token)
