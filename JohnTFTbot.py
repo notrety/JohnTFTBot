@@ -330,6 +330,57 @@ def check_data(id):
         # If user isn't linked, inform the user
         return False, None, None
 
+# Command to get trait icon with texture 
+def trait_image(trait_name: str, style: int):
+    try:
+        # Download the trait texture  
+        texture_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/{style_to_texture.get(style, 'default_texture')}.png"
+        texture_response = requests.get(texture_url)
+
+        if texture_response.status_code != 200:
+            print(f"Failed to fetch texture from {texture_url}, Status Code: {texture_response.status_code}")
+            return None
+
+        texture = Image.open(BytesIO(texture_response.content))
+
+        # Download the trait icon
+        icon_path = get_trait_icon(trait_icon_mapping, trait_name).lower()
+        icon_url = f"https://raw.communitydragon.org/latest/game/{icon_path}.png"
+        print(f"Fetching icon from: {icon_url}")
+
+        icon_response = requests.get(icon_url)
+        if icon_response.status_code != 200:
+            print(f"Failed to fetch icon from {icon_url}, Status Code: {icon_response.status_code}")
+            return None
+
+        icon = Image.open(BytesIO(icon_response.content))
+
+        # Convert white parts of the icon to black for better visibility
+        icon = icon.convert("RGBA")
+        pixels = icon.load()
+        for i in range(icon.width):
+            for j in range(icon.height):
+                r, g, b, a = pixels[i, j]
+                if r > 200 and g > 200 and b > 200:  # If the pixel is white
+                    pixels[i, j] = (0, 0, 0, a)  # Change it to black (retain transparency)
+
+        # Resize the icon
+        icon_resized = icon.resize((64, 64), Image.LANCZOS)
+
+        # Ensure the texture is large enough to paste the icon
+        if texture.width < 64 or texture.height < 64:
+            print(f"Warning: Texture is too small ({texture.width}x{texture.height}), skipping overlay.")
+            return None
+
+        # Paste the icon onto the texture
+        texture.paste(icon_resized, (12, 18), icon_resized)
+
+        return texture
+
+    except Exception as e:
+        print(f"Error in trait_image for {trait_name} (style {style}): {e}")
+        return None
+
 # Show bot is online
 @bot.event
 async def on_ready():
@@ -479,15 +530,15 @@ async def champion(ctx, champion_name: str, tier: int = 0, rarity: int = 1, *ite
         rarity_response = requests.get(rarity_url)
         rarity_border = Image.open(BytesIO(rarity_response.content)).convert("RGBA")
         rarity_resized = rarity_border.resize((72,72), Image.LANCZOS)
-        new_image = Image.new("RGBA", (72, 140), (0, 0, 0, 0))
-        new_image.paste(rarity_resized, (0,25), rarity_resized)
-        new_image.paste(icon_resized, (4, 29), icon_resized)
+        final_image = Image.new("RGBA", (72, 140), (0, 0, 0, 0))
+        final_image.paste(rarity_resized, (0,25), rarity_resized)
+        final_image.paste(icon_resized, (4, 29), icon_resized)
         if(tier == 2 or tier == 3):
             tier_icon_path = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-" + str(tier) + ".png"
             tier_reponse = requests.get(tier_icon_path)
             tier_icon = Image.open(BytesIO(tier_reponse.content)).convert("RGBA")
             tier_resized = tier_icon.resize((72,36), Image.LANCZOS)
-            new_image.paste(tier_resized, (0,0), tier_resized)
+            final_image.paste(tier_resized, (0,0), tier_resized)
         # Create an embed with the image
         n = len(items)
         for i in range(n):
@@ -496,10 +547,10 @@ async def champion(ctx, champion_name: str, tier: int = 0, rarity: int = 1, *ite
             item_response = requests.get(item_url)
             item_icon = Image.open(BytesIO(item_response.content)).convert("RGBA")
             item_resized = item_icon.resize((23,23), Image.LANCZOS)
-            new_image.paste(item_resized, (1 + 23*i,97), item_resized)
+            final_image.paste(item_resized, (1 + 23*i,97), item_resized)
 
         embed = discord.Embed(title="Champion Icon")
-        new_image.save("champ_overlay.png")
+        final_image.save("champ_overlay.png")
 
         # Send the final image as an embed
         file = discord.File("champ_overlay.png", filename="champ.png")
@@ -509,61 +560,56 @@ async def champion(ctx, champion_name: str, tier: int = 0, rarity: int = 1, *ite
     else:
         await ctx.send(f"Champion {champion_name} not found.")
 
-# Command to get trait icon with texture NEED TO UPDATE WITH NEW TEXTURE PATHS
 @bot.command()
-async def overlay(ctx, trait_name: str, style: int):
-    
-    # Download the trait texture 
-    texture_url = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/" + style_to_texture[style] + ".png"
-    texture_response = requests.get(texture_url)
-    texture = Image.open(BytesIO(texture_response.content))
+async def gigaTrait(ctx, puuid: str, match_id: str):
+    match_info = tft_watcher.match.by_id(region, match_id)
 
-    # Download the overlay icon from community dragon
-    icon_path = get_trait_icon(trait_icon_mapping, trait_name).lower()
-    icon_url = "https://raw.communitydragon.org/latest/game/" + icon_path + ".png"
-    print(icon_url)
-    icon_response = requests.get(icon_url)
-    icon = Image.open(BytesIO(icon_response.content))
+    # Find the participant matching the given PUUID
+    for participant in match_info['info']['participants']:
+        if participant['puuid'] == puuid:
+            traits = participant['traits']
+            num_traits = 0
 
-    # Converting icon color from white to black for visibility
-    icon = icon.convert("RGBA")
-    pixels = icon.load()
-    for i in range(icon.width):
-        for j in range(icon.height):
-            r, g, b, a = pixels[i, j]
-            if r > 200 and g > 200 and b > 200:  # If the pixel is white
-                pixels[i, j] = (0, 0, 0, a)  # Change it to black (retain transparency)
+            # Count the traits with style > 0
+            for trait in traits:
+                if trait['style'] > 0:
+                    num_traits += 1
 
-    icon_resized = icon.resize((64,64), Image.LANCZOS)
+            if num_traits == 0:
+                await ctx.send("No traits found for this player.")
+                return
 
-    # Paste the icon onto the cropped section of the atlas
-    texture.paste(icon_resized, (12, 18), icon_resized)  # Pasting icon in the top-left corner of the cropped area
+            # Create the final image with extended width
+            img_width = 89 * num_traits
+            img_height = 103
+            final_image = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
 
-    # Save or use in Discord
-    texture.save("final_trait_overlay.png")
+            # Overlay the trait images
+            x_offset = 0  # Keep track of where to paste the next image
+            for trait in traits:
+                if trait['style'] > 0:  # Only include traits with style > 0
+                    temp_image = trait_image(trait['name'], trait['style'])
+                    if temp_image is None:
+                        continue  # Skip if image failed to generate
 
-    # Send the final image as an embed
-    file = discord.File("final_trait_overlay.png", filename="trait.png")
-    embed = discord.Embed(title="Trait Icon Overlay")
-    embed.set_image(url="attachment://trait.png")
-    await ctx.send(embed=embed, file=file)
+                    temp_image = temp_image.convert("RGBA")  # Ensure it's RGBA
+                    mask = temp_image.split()[3]  # Get the alpha channel
+                    final_image.paste(temp_image, (x_offset, 0), mask)  # Use alpha mask
+                    x_offset += 89  # Move to the next position horizontally
 
-# Command to get item icon
-@bot.command()
-async def item(ctx, item_name: str):
-        item_icon_path = get_item_icon(item_mapping, item_name).lower()
-        if item_icon_path:
-            # Build the URL for the item's icon
-            item_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + item_icon_path
-            print(item_url)
-            # Create an embed with the image
-            embed = discord.Embed(title="Item Icon")
-            embed.set_image(url=item_url)
-            
-            # Send the embed
-            await ctx.send(embed=embed)
-        else:
-            await ctx.send(f"Item {item_name} not found.")
+            # Save and send the final image
+            final_image.save("giga_traits_overlay.png")
+
+            # Create the embed
+            file = discord.File("giga_traits_overlay.png", filename="giga.png")
+            embed = discord.Embed(title="Giga Traits Overlay")
+            embed.set_image(url="attachment://giga.png")
+
+            await ctx.send(embed=embed, file=file)
+            return  # Exit after sending
+
+    # If we never find the player
+    await ctx.send(f"Could not find participant with PUUID: {puuid}")
 
 # Run the bot with your token
 bot.run(bot_token)
