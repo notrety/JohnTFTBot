@@ -568,15 +568,19 @@ async def gigaTrait(ctx, puuid: str, match_id: str):
     for participant in match_info['info']['participants']:
         if participant['puuid'] == puuid:
             traits = participant['traits']
-            num_traits = 0
 
-            # Count the traits with style > 0
-            for trait in traits:
-                if trait['style'] > 0:
-                    num_traits += 1
+            # Define a custom order for styles (3 -> 0, 5 -> 1, 4 -> 2, 2 -> 3, 1 -> 4)
+            style_order = {3: 0, 5: 1, 4: 2, 2: 3, 1: 4}
+            
+            # Filter traits to only include those with style 1 or higher
+            filtered_traits = [trait for trait in traits if trait['style'] >= 1]
 
+            # Sort the filtered traits by style using the custom order
+            sorted_traits = sorted(filtered_traits, key=lambda x: style_order.get(x['style'], 5))  # Default to 5 if style not found
+
+            num_traits = len(sorted_traits)
             if num_traits == 0:
-                await ctx.send("No traits found for this player.")
+                await ctx.send("No valid traits found for this player.")
                 return
 
             # Create the final image with extended width
@@ -586,16 +590,15 @@ async def gigaTrait(ctx, puuid: str, match_id: str):
 
             # Overlay the trait images
             x_offset = 0  # Keep track of where to paste the next image
-            for trait in traits:
-                if trait['style'] > 0:  # Only include traits with style > 0
-                    temp_image = trait_image(trait['name'], trait['style'])
-                    if temp_image is None:
-                        continue  # Skip if image failed to generate
+            for trait in sorted_traits:
+                temp_image = trait_image(trait['name'], trait['style'])
+                if temp_image is None:
+                    continue  # Skip if image failed to generate
 
-                    temp_image = temp_image.convert("RGBA")  # Ensure it's RGBA
-                    mask = temp_image.split()[3]  # Get the alpha channel
-                    final_image.paste(temp_image, (x_offset, 0), mask)  # Use alpha mask
-                    x_offset += 89  # Move to the next position horizontally
+                temp_image = temp_image.convert("RGBA")  # Ensure it's RGBA
+                mask = temp_image.split()[3]  # Get the alpha channel
+                final_image.paste(temp_image, (x_offset, 0), mask)  # Use alpha mask
+                x_offset += 89  # Move to the next position horizontally
 
             # Save and send the final image
             final_image.save("giga_traits_overlay.png")
