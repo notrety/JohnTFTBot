@@ -192,6 +192,15 @@ def get_puuid(gameName, tagLine):
         print("Failed to retrieve PUUID for {gameName}#{tagLine}.")
         return None
 
+# Function to calculate ranked elo based on given PUUID
+def calculate_elo(puuid):
+    summoner = tft_watcher.summoner.by_puuid(region, puuid)
+    rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+
+    for entry in rank_info:
+        if entry['queueType'] == 'RANKED_TFT':
+            return rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+
 # Function to get rank info from puuid and return embed with rank icon
 def get_rank_embed(gameName, tagLine):
     puuid = get_puuid(gameName, tagLine)
@@ -268,25 +277,11 @@ def last_match(gameName, tagLine, mode):
 
         # Find player stats
         for participant in match_info['info']['participants']:
-            player_puuid = participant['puuid']
-            placement = participant['placement']
-
-            # Check elos of all players to calculate average
-            summoner = tft_watcher.summoner.by_puuid(region, player_puuid)
-            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
-
-            for entry in rank_info:
-                if entry['queueType'] == 'RANKED_TFT':
-                    tier = entry['tier']
-                    rank = entry['rank']
-                    tier_and_rank = tier + " " + rank
-                    lp = entry['leaguePoints']
-            
-            player_elos += rank_to_elo[tier_and_rank]
-            player_elos += int(lp)
+            puuid = participant['puuid']
+            player_elos += calculate_elo(puuid)
 
             # Fetch gameName and tagLine from PUUID
-            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
+            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{puuid}?api_key={riot_token}"
             response = requests.get(riot_id_url)
             riot_id_info = response.json()
 
@@ -495,26 +490,6 @@ async def r(ctx, *args):
             result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
         await ctx.send(embed=result_embed)
 
-# Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
-@bot.command()
-async def commands(ctx): 
-    commands_embed = discord.Embed(
-    title=f"Commands List",
-    description=f"""
-**!r** - View most recent ranked match\n
-**!rn** - View most recent normal match\n
-**!rh** - View most recent hyper roll match\n
-**!rd** - View most recent double up match\n
-**!rg** - View most recent game mode match\n
-**!stats** - Check ranked stats for a player\n
-**!ping** - Test that bot is active\n
-**!commands** - Get a list of all commands\n
-**!link** - Link discord account to riot account
-    """,
-    color=discord.Color.blue()
-    )
-    await ctx.send(embed=commands_embed)
-
 # Command to link riot and discord accounts, stored in mongodb database
 @bot.command()
 async def link(ctx, name: str, tag: str):
@@ -654,6 +629,81 @@ async def player_board(ctx, puuid: str, match_id: str):
 
     # If no participant matches the given PUUID
     await ctx.send(f"Could not find participant with PUUID: {puuid}")
+
+# Command to check leaderboard of all linked accounts for ranked tft
+@bot.command()
+async def lb(ctx):
+    _, gameName, tagLine = check_data(ctx.author.id)
+    result = ""
+    all_users = collection.find()
+    
+    # Create a list to store all users' elo and name
+    user_elo_and_name = []
+    
+    for user in all_users:
+        name = user['name']
+        tag = user['tag']
+        puuid = get_puuid(name, tag)
+        
+        if not puuid:
+            await ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
+            continue  # Skip to the next user if there's an issue retrieving the PUUID
+        
+        user_elo = calculate_elo(puuid)
+        name_and_tag = name + "#" + tag
+        
+        # Append each user's data (elo, name_and_tag) to the list
+        user_elo_and_name.append((user_elo, name_and_tag))
+    
+    # Sort users by their elo score (assuming user_elo is a numeric value)
+    user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
+    
+    # Prepare the leaderboard result
+    for index, (user_elo, name_and_tag) in enumerate(user_elo_and_name):
+        name, tag = name_and_tag.split("#")
+        summoner = tft_watcher.summoner.by_puuid(region, get_puuid(name, tag))
+        rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+        
+        for entry in rank_info:
+            if entry['queueType'] == 'RANKED_TFT':
+                tier = entry['tier']
+                division = entry['rank']
+                lp = entry['leaguePoints']
+        
+        if name == gameName and tag == tagLine:
+            result += f"**{index + 1}** - **__{name_and_tag}__: {tier} {division} {lp} LP**\n"
+        else:
+            result += f"**{index + 1}** - {name_and_tag}: {tier} {division} {lp} LP\n"
+    
+    lb_embed = discord.Embed(
+        title=f"Overall Bot Ranked Leaderboard",
+        description=result,
+        color=discord.Color.blue()
+    )
+    await ctx.send(embed=lb_embed)
+
+
+
+# Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
+@bot.command()
+async def commands(ctx): 
+    commands_embed = discord.Embed(
+    title=f"Commands List",
+    description=f"""
+**!r** - View most recent ranked match\n
+**!rn** - View most recent normal match\n
+**!rh** - View most recent hyper roll match\n
+**!rd** - View most recent double up match\n
+**!rg** - View most recent game mode match\n
+**!stats** - Check ranked stats for a player\n
+**!lb** - View overall bot leaderboard\n
+**!ping** - Test that bot is active\n
+**!commands** - Get a list of all commands\n
+**!link** - Link discord account to riot account
+    """,
+    color=discord.Color.blue()
+    )
+    await ctx.send(embed=commands_embed)
 
 # Run the bot with your token
 bot.run(bot_token)
