@@ -318,6 +318,7 @@ def last_match(gameName, tagLine, mode):
             avg_rank = keys[0]
         # Format the message
         result = ""
+
         for placement, name in players_data:
             full_name = gameName + "#" + tagLine
             if custom_equal(full_name, name, "_ "):
@@ -331,8 +332,8 @@ def last_match(gameName, tagLine, mode):
                 else:
                     result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
-        return result, avg_rank, master_plus_lp
-    
+        return result, match_id, avg_rank, master_plus_lp
+
     except Exception as err:
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, 0
 
@@ -486,67 +487,22 @@ async def r(ctx, *args):
         await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
     if data:
-        result, avg_rank, master_plus_lp = last_match(gameName, tagLine, game_type)
-        result_embed = discord.Embed(
+        result, match_id, avg_rank, master_plus_lp = last_match(gameName, tagLine, game_type)
+        embed = discord.Embed(
                         title=f"Recent {game_type} TFT Match Placements:",
                         description=result,
                         color=discord.Color.blue()
                     )
         if master_plus_lp == 0:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
+            embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
         else:
-            result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-        await ctx.send(embed=result_embed)
+            embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
+        await ctx.send(embed=embed)
 
-# Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
-@bot.command()
-async def commands(ctx): 
-    commands_embed = discord.Embed(
-    title=f"Commands List",
-    description=f"""
-**!r** - View most recent ranked match\n
-**!rn** - View most recent normal match\n
-**!rh** - View most recent hyper roll match\n
-**!rd** - View most recent double up match\n
-**!rg** - View most recent game mode match\n
-**!stats** - Check ranked stats for a player\n
-**!ping** - Test that bot is active\n
-**!commands** - Get a list of all commands\n
-**!link** - Link discord account to riot account
-    """,
-    color=discord.Color.blue()
-    )
-    await ctx.send(embed=commands_embed)
-
-# Command to link riot and discord accounts, stored in mongodb database
-@bot.command()
-async def link(ctx, name: str, tag: str):
-    user_id = str(ctx.author.id)
-    
-    # Check if the user already has linked data
-    existing_user = collection.find_one({"discord_id": user_id})
-    
-    if existing_user:
-        # If user already has data, update it
-        collection.update_one(
-            {"discord_id": user_id},
-            {"$set": {"name": name, "tag": tag}}
-        )
-        await ctx.send(f"Your data has been updated to: {name} {tag}")
-    else:
-        # If no data exists, insert a new document for the user
-        collection.insert_one({
-            "discord_id": user_id,
-            "name": name,
-            "tag": tag
-        })
-        await ctx.send(f"Your data has been linked: {name} {tag}")
-
-# Command to return traits units and items of a player given puuid and match_id, to be merged into last_match
-@bot.command()
-async def player_board(ctx, puuid: str, match_id: str):
     match_info = tft_watcher.match.by_id(region, match_id)
     participants = match_info['info']['participants']
+
+    puuid = get_puuid(gameName, tagLine)
     # Sort in ascending order
     participants_sorted = sorted(participants, key=lambda x: x['placement'])
 
@@ -647,16 +603,15 @@ async def player_board(ctx, puuid: str, match_id: str):
         # Get summoner's gameName and tagLine from the match_info
         gameName = participant.get('riotIdGameName', 'Unknown')  # Changed this part
         tagLine = participant.get('riotIdTagline', 'Unknown')    # Changed this part
-        print(participant)
         # Save & Return Image & Embed
         final_combined_image.save("player_board.png")
         file = discord.File("player_board.png", filename="player_board.png")
-        embed = discord.Embed(title=f"{gameName}#{tagLine} - Placement {index + 1}/{len(puuid_list)}")
+        embed = discord.Embed(title=f"{gameName}#{tagLine} - Placement {index + 1}/{len(puuid_list)}", description="")
         embed.set_image(url="attachment://player_board.png")
 
         return embed, file
 
-    # --- Button View ---
+        # --- Button View ---
     class PlayerSwitchView(View):
         def __init__(self, index):
             super().__init__()
@@ -676,6 +631,50 @@ async def player_board(ctx, puuid: str, match_id: str):
     # --- Send Initial Message ---
     embed, file = await generate_board(current_index)
     await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index))
+    
+# Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
+@bot.command()
+async def commands(ctx): 
+    commands_embed = discord.Embed(
+    title=f"Commands List",
+    description=f"""
+**!r** - View most recent ranked match\n
+**!rn** - View most recent normal match\n
+**!rh** - View most recent hyper roll match\n
+**!rd** - View most recent double up match\n
+**!rg** - View most recent game mode match\n
+**!stats** - Check ranked stats for a player\n
+**!ping** - Test that bot is active\n
+**!commands** - Get a list of all commands\n
+**!link** - Link discord account to riot account
+    """,
+    color=discord.Color.blue()
+    )
+    await ctx.send(embed=commands_embed)
+
+# Command to link riot and discord accounts, stored in mongodb database
+@bot.command()
+async def link(ctx, name: str, tag: str):
+    user_id = str(ctx.author.id)
+    
+    # Check if the user already has linked data
+    existing_user = collection.find_one({"discord_id": user_id})
+    
+    if existing_user:
+        # If user already has data, update it
+        collection.update_one(
+            {"discord_id": user_id},
+            {"$set": {"name": name, "tag": tag}}
+        )
+        await ctx.send(f"Your data has been updated to: {name} {tag}")
+    else:
+        # If no data exists, insert a new document for the user
+        collection.insert_one({
+            "discord_id": user_id,
+            "name": name,
+            "tag": tag
+        })
+        await ctx.send(f"Your data has been linked: {name} {tag}")
 
 # Run the bot with your token
 bot.run(bot_token)
