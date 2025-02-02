@@ -3,10 +3,6 @@
 import discord
 import requests
 import dicts
-from discord.ext import commands
-from riotwatcher import TftWatcher
-from dotenv import load_dotenv
-from pymongo.mongo_client import MongoClient
 from PIL import Image
 from io import BytesIO
 
@@ -24,12 +20,12 @@ def get_champ_icon(champs_data, characterName):
     # Loop through each champion in the list
     for champion in champs_data:        
         # Check if the apiName matches the provided characterName
-        if champion.get("apiName") == characterName:
+        if champion.get("apiName").lower() == characterName.lower():
             print("Champion Found")
             # Assuming 'champion' dictionary contains a 'squareIcon' key with the icon path
             return champion.get("tileIcon", "")[:-4]  # Remove the last 4 characters (usually file extension)
     
-    print("Champion Not Found")
+    print(f"{characterName} Not Found")
     return None
 
 # Function to get the item icon path
@@ -103,13 +99,15 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
 
     puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None, 0
+        print(f"Could not find PUUID for {gameName}#{tagLine}.")
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0
 
     try:
         # Fetch the latest 20 matches
         match_list = tft_watcher.match.by_puuid(region, puuid, count=20)
         if not match_list:
-            return f"No matches found for {gameName}#{tagLine}.", None, 0
+            print(f"No matches found for {gameName}#{tagLine}.")
+            return f"No matches found for {gameName}#{tagLine}.", None, None, 0
 
         match_id = None
         match_found = False
@@ -127,7 +125,8 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
                     break
         if not match_found:
             mode = mode.lower()
-            return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, 0
+            print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
+            return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None, 0
 
         # Fetch match details
         match_info = tft_watcher.match.by_id(region, match_id)
@@ -137,12 +136,30 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
 
         # Find player stats
         for participant in match_info['info']['participants']:
-            puuid = participant['puuid']
+            player_puuid = participant['puuid']
             placement = participant['placement']
-            player_elos += calculate_elo(puuid, tft_watcher, region)
+
+            # Check elos of all players to calculate average
+            summoner = tft_watcher.summoner.by_puuid(region, player_puuid)
+            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+
+            tier_and_rank = ""
+            ranked_players = 8
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    tier = entry['tier']
+                    rank = entry['rank']
+                    tier_and_rank = tier + " " + rank
+                    lp = entry['leaguePoints']
+            
+            if not tier_and_rank == "":
+                player_elos += dicts.rank_to_elo[tier_and_rank]
+                player_elos += int(lp)
+            else: 
+                ranked_players-=1
 
             # Fetch gameName and tagLine from PUUID
-            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{puuid}?api_key={riot_token}"
+            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
             response = requests.get(riot_id_url)
             riot_id_info = response.json()
 
@@ -158,7 +175,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
         players_data.sort()
 
         # Calculate average lobby elo
-        avg_elo = player_elos / 8
+        avg_elo = player_elos / ranked_players
         master_plus_lp = 0 
         avg_rank = ""
         # Find all keys greater than value
@@ -184,10 +201,11 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
                 else:
                     result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
-        return result, avg_rank, master_plus_lp
+        return result, match_id, avg_rank, master_plus_lp
     
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, 0
+        print(f"Error fetching last match for {gameName}#{tagLine}: {err}")
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0
 
 # Custom equal to handle spaces in usernames
 def custom_equal(str1, str2, chars_to_ignore):

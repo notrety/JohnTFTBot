@@ -2,6 +2,7 @@ import discord
 import requests
 import helpers
 import dicts
+from discord.ui import View
 from discord.ext import commands
 from PIL import Image
 from io import BytesIO
@@ -89,18 +90,158 @@ class BotCommands(commands.Cog):
             # User formatted command incorrectly, let them know
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
+        match_id = None
         if data:
-            result, avg_rank, master_plus_lp = helpers.last_match(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region)
-            result_embed = discord.Embed(
+            result, match_id, avg_rank, master_plus_lp = helpers.last_match(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region)
+            embed = discord.Embed(
                             title=f"Recent {game_type} TFT Match Placements:",
                             description=result,
                             color=discord.Color.blue()
                         )
             if master_plus_lp == 0:
-                result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
+                embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
             else:
-                result_embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-            await ctx.send(embed=result_embed)
+                embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
+            await ctx.send(embed=embed)
+
+        match_info = self.tft_watcher.match.by_id(self.region, match_id)
+        participants = match_info['info']['participants']
+
+        puuid = helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_token)
+        print(puuid)
+
+        # Sort in ascending order
+        participants_sorted = sorted(participants, key=lambda x: x['placement'])
+
+        puuid_list = [p['puuid'] for p in participants_sorted]
+        print(puuid_list)
+
+        if puuid not in puuid_list:
+            await ctx.send(f"Could not find participant with PUUID: {puuid}")
+            return
+
+        current_index = puuid_list.index(puuid)
+
+        async def generate_board(index):
+            participant = participants_sorted[index]
+
+            # --- Traits Processing ---
+            traits = participant['traits']
+            filtered_traits = [trait for trait in traits if trait['style'] >= 1]
+            sorted_traits = sorted(filtered_traits, key=lambda x: dicts.style_order.get(x['style'], 5))
+            num_traits = len(sorted_traits)
+
+            trait_img_width = 89 * num_traits
+            trait_img_height = 103
+            trait_final_image = Image.new("RGBA", (trait_img_width, trait_img_height), (0, 0, 0, 0))
+
+            for i, trait in enumerate(sorted_traits):
+                temp_image = helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
+                if temp_image:
+                    temp_image = temp_image.convert("RGBA")
+                    mask = temp_image.split()[3]
+                    trait_final_image.paste(temp_image, (89 * i, 0), mask)
+
+            # --- Champions Processing ---
+            units = participant.get('units', [])
+            champ_img_width = 0
+            champ_img_height = 140
+            champ_unit_data = []
+
+            for unit in units:
+                champion_name = unit["character_id"]
+                tier = unit["tier"]
+                rarity = unit["rarity"]
+                item_names = unit["itemNames"]
+
+                custom_rarity = dicts.rarity_map.get(rarity, rarity)
+                champ_icon_path = helpers.get_champ_icon(self.champ_mapping, champion_name).lower()
+                if champ_icon_path:
+                    champion_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + champ_icon_path + ".png"
+                    champion_response = requests.get(champion_url)
+                    icon = Image.open(BytesIO(champion_response.content)).convert("RGBA")
+                    icon_resized = icon.resize((64, 64), Image.LANCZOS)
+
+                    rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
+                    rarity_response = requests.get(rarity_url)
+                    rarity_border = Image.open(BytesIO(rarity_response.content)).convert("RGBA")
+                    rarity_resized = rarity_border.resize((72, 72), Image.LANCZOS)
+
+                    champ_img_width += 72
+                    champ_unit_data.append({
+                        "champion_name": champion_name,
+                        "icon_resized": icon_resized,
+                        "rarity_resized": rarity_resized,
+                        "tier": tier,
+                        "item_names": item_names
+                    })
+
+            # Create Champion Image
+            champ_final_image = Image.new("RGBA", (champ_img_width, champ_img_height), (0, 0, 0, 0))
+            current_x = 0
+
+            for unit in champ_unit_data:
+                champ_final_image.paste(unit["rarity_resized"], (current_x, 25), unit["rarity_resized"])
+                champ_final_image.paste(unit["icon_resized"], (current_x + 4, 29), unit["icon_resized"])
+
+                if unit["tier"] in {2, 3}:
+                    tier_icon_path = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{unit['tier']}.png"
+                    tier_response = requests.get(tier_icon_path)
+                    tier_icon = Image.open(BytesIO(tier_response.content)).convert("RGBA")
+                    tier_resized = tier_icon.resize((72, 36), Image.LANCZOS)
+                    champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
+
+                for i, item_name in enumerate(unit["item_names"]):
+                    item_icon_path = helpers.get_item_icon(self.item_mapping, item_name).lower()
+                    item_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + item_icon_path
+                    item_response = requests.get(item_url)
+                    item_icon = Image.open(BytesIO(item_response.content)).convert("RGBA")
+                    item_resized = item_icon.resize((23, 23), Image.LANCZOS)
+                    champ_final_image.paste(item_resized, (current_x + 23 * i, 97), item_resized)
+
+                current_x += 72
+
+            # --- Combine Images ---
+            final_img_height = trait_img_height + champ_img_height
+            final_combined_image = Image.new("RGBA", (max(trait_img_width, champ_img_width), final_img_height), (0, 0, 0, 0))
+            final_combined_image.paste(trait_final_image, (0, 0), trait_final_image)
+            final_combined_image.paste(champ_final_image, (0, trait_img_height), champ_final_image)
+
+            # Get summoner's gameName and tagLine from the match_info
+            gameName = participant.get('riotIdGameName', 'Unknown')
+            tagLine = participant.get('riotIdTagline', 'Unknown')
+            # Save & Return Image & Embed
+            final_combined_image.save("player_board.png")
+            file = discord.File("player_board.png", filename="player_board.png")
+            embed = discord.Embed(title=f"{gameName}#{tagLine} - Placement {index + 1}/{len(puuid_list)}", description="")
+            embed.set_image(url="attachment://player_board.png")
+
+            return embed, file
+
+            # --- Button View ---
+        class PlayerSwitchView(View):
+            def __init__(self, index, author_id):
+                super().__init__()
+                self.index = index
+                self.author_id = author_id
+
+            @discord.ui.button(label="Next Player", style=discord.ButtonStyle.primary)
+            async def next_player(self, interaction: discord.Interaction, button: discord.ui.Button):  
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message("You cannot use this button!", ephemeral=True)
+                    return
+                await interaction.response.defer()  # Avoid timeout
+
+                new_index = (self.index + 1) % 8  # Loop through players
+                new_embed, new_file = await generate_board(new_index)
+
+                # Update the message with new data
+                await interaction.followup.edit_message(interaction.message.id, embed=new_embed, view=PlayerSwitchView(new_index, self.author_id))
+                await interaction.message.edit(attachments=[new_file])  # Reattach the file separately
+
+        # --- Send Initial Message ---
+        embed, file = await generate_board(current_index)
+        await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
 
     # Command to link riot and discord accounts, stored in mongodb database
     @commands.command()
@@ -125,122 +266,6 @@ class BotCommands(commands.Cog):
                 "tag": tag
             })
             await ctx.send(f"Your data has been linked: {name} {tag}")
-
-    # Command to return traits units and items of a player given puuid and match_id, to be merged into last_match
-    @commands.command()
-    async def player_board(self, ctx, puuid: str, match_id: str):
-        match_info = self.tft_watcher.match.by_id(self.region, match_id)
-
-        # Find the participant matching the given PUUID
-        for participant in match_info['info']['participants']:
-            if participant['puuid'] == puuid:
-                # --- Traits Logic ---
-                traits = participant['traits']
-                
-                # Filter traits to only include those with style 1 or higher
-                filtered_traits = [trait for trait in traits if trait['style'] >= 1]
-
-                # Sort the filtered traits by style using the custom order
-                sorted_traits = sorted(filtered_traits, key=lambda x: dicts.style_order.get(x['style'], 5))  # Default to 5 if style not found
-
-                num_traits = len(sorted_traits)
-                if num_traits == 0:
-                    await ctx.send("No valid traits found for this player.")
-                    return
-
-                # Create the trait image with extended width
-                trait_img_width = 89 * num_traits
-                trait_img_height = 103
-                trait_final_image = Image.new("RGBA", (trait_img_width, trait_img_height), (0, 0, 0, 0))
-
-                for i, trait in enumerate(sorted_traits):
-                    temp_image = helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
-                    if temp_image:
-                        temp_image = temp_image.convert("RGBA")  # Ensure it's RGBA
-                        mask = temp_image.split()[3]  # Get the alpha channel
-                        trait_final_image.paste(temp_image, (89 * i, 0), mask)
-
-                # --- Champions Logic ---
-                units = participant.get('units', [])
-                champ_img_width = 0
-                champ_img_height = 140
-                champ_unit_data = []
-
-                for unit in units:
-                    champion_name = unit["character_id"]
-                    tier = unit["tier"]
-                    rarity = unit["rarity"]
-                    item_names = unit["itemNames"]
-
-                    custom_rarity = dicts.rarity_map.get(rarity, rarity)
-
-                    # Get the champion icon
-                    champ_icon_path = helpers.get_champ_icon(self.champ_mapping, champion_name).lower()
-                    if champ_icon_path:
-                        champion_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + champ_icon_path + ".png"
-                        champion_response = requests.get(champion_url)
-                        icon = Image.open(BytesIO(champion_response.content)).convert("RGBA")
-                        icon_resized = icon.resize((64, 64), Image.LANCZOS)
-
-                        # Get the rarity icon based on the custom rarity
-                        rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
-                        rarity_response = requests.get(rarity_url)
-                        rarity_border = Image.open(BytesIO(rarity_response.content)).convert("RGBA")
-                        rarity_resized = rarity_border.resize((72, 72), Image.LANCZOS)
-
-                        champ_img_width += 72  # Add the width of the champion icon with rarity
-                        champ_unit_data.append({
-                            "champion_name": champion_name,
-                            "icon_resized": icon_resized,
-                            "rarity_resized": rarity_resized,
-                            "tier": tier,
-                            "item_names": item_names
-                        })
-
-                # Create the champion image
-                champ_final_image = Image.new("RGBA", (champ_img_width, champ_img_height), (0, 0, 0, 0))
-                current_x = 0
-
-                for unit in champ_unit_data:
-                    champ_final_image.paste(unit["rarity_resized"], (current_x, 25), unit["rarity_resized"])
-                    champ_final_image.paste(unit["icon_resized"], (current_x + 4, 29), unit["icon_resized"])
-
-                    if unit["tier"] == 2 or unit["tier"] == 3:
-                        tier_icon_path = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{unit['tier']}.png"
-                        tier_response = requests.get(tier_icon_path)
-                        tier_icon = Image.open(BytesIO(tier_response.content)).convert("RGBA")
-                        tier_resized = tier_icon.resize((72, 36), Image.LANCZOS)
-                        champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
-
-                    for i, item_name in enumerate(unit["item_names"]):
-                        item_icon_path = helpers.get_item_icon(self.item_mapping, item_name).lower()
-                        item_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + item_icon_path
-                        item_response = requests.get(item_url)
-                        item_icon = Image.open(BytesIO(item_response.content)).convert("RGBA")
-                        item_resized = item_icon.resize((23, 23), Image.LANCZOS)
-                        champ_final_image.paste(item_resized, (current_x + 23 * i, 97), item_resized)
-
-                    current_x += 72
-
-                # --- Combine the Trait and Champion Images ---
-                # Create a new final image with combined height (traits + champions)
-                final_img_height = trait_img_height + champ_img_height
-                final_combined_image = Image.new("RGBA", (max(trait_img_width, champ_img_width), final_img_height), (0, 0, 0, 0))
-
-                # Paste trait and champion images
-                final_combined_image.paste(trait_final_image, (0, 0), trait_final_image)
-                final_combined_image.paste(champ_final_image, (0, trait_img_height), champ_final_image)
-
-                # Save and send the final image
-                final_combined_image.save("player_board.png")
-                file = discord.File("player_board.png", filename="player_board.png")
-                embed = discord.Embed(title="Player Traits & Champions Overlay")
-                embed.set_image(url="attachment://player_board.png")
-                await ctx.send(embed=embed, file=file)
-                return  # Exit after sending
-
-        # If no participant matches the given PUUID
-        await ctx.send(f"Could not find participant with PUUID: {puuid}")
 
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command()
