@@ -2,6 +2,8 @@ import discord
 import requests
 import helpers
 import dicts
+import asyncio
+import aiohttp
 from discord.ui import View
 from discord.ext import commands
 from PIL import Image
@@ -90,37 +92,50 @@ class BotCommands(commands.Cog):
             # User formatted command incorrectly, let them know
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
-        match_id = None
-        if data:
-            result, match_id, avg_rank, master_plus_lp = helpers.last_match(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region)
-            embed = discord.Embed(
-                            title=f"Recent {game_type} TFT Match Placements:",
-                            description=result,
-                            color=discord.Color.blue()
-                        )
-            if master_plus_lp == 0:
-                embed.set_footer(text=f"Average Lobby Rank: {avg_rank}")
-            else:
-                embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP")
-            await ctx.send(embed=embed)
+        if not data:
+            return
 
-        match_info = self.tft_watcher.match.by_id(self.region, match_id)
+        # Fetch match data asynchronously
+        result, match_id, avg_rank, master_plus_lp = await asyncio.to_thread(
+            helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region
+        )
+
+        embed = discord.Embed(
+            title=f"Recent {game_type} TFT Match Placements:",
+            description=result,
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP" if master_plus_lp else f"Average Lobby Rank: {avg_rank}")
+        await ctx.send(embed=embed)
+
+        match_info = await asyncio.to_thread(
+            self.tft_watcher.match.by_id, self.region, match_id
+        )
         participants = match_info['info']['participants']
 
-        puuid = helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_token)
-        print(puuid)
+        puuid = await asyncio.to_thread(
+            helpers.get_puuid, gameName, tagLine, self.mass_region, self.riot_token
+        )
 
         # Sort in ascending order
-        participants_sorted = sorted(participants, key=lambda x: x['placement'])
-
-        puuid_list = [p['puuid'] for p in participants_sorted]
-        print(puuid_list)
-
-        if puuid not in puuid_list:
+        if puuid not in [p['puuid'] for p in participants]:
             await ctx.send(f"Could not find participant with PUUID: {puuid}")
             return
 
+        participants_sorted = sorted(participants, key=lambda x: x['placement'])
+        puuid_list = [p['puuid'] for p in participants_sorted]
         current_index = puuid_list.index(puuid)
+        
+        #Fetches an image from a URL and resizes it if a size is provided.
+        async def fetch_image(url: str, size: tuple = None):
+            
+            response = await asyncio.to_thread(requests.get, url)
+            image = Image.open(BytesIO(response.content)).convert("RGBA")
+
+            if size:
+                image = image.resize(size, Image.LANCZOS)
+
+            return image
 
         async def generate_board(index):
             participant = participants_sorted[index]
@@ -135,20 +150,21 @@ class BotCommands(commands.Cog):
             trait_img_height = 103
             trait_final_image = Image.new("RGBA", (trait_img_width, trait_img_height), (0, 0, 0, 0))
 
-            for i, trait in enumerate(sorted_traits):
-                temp_image = helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
+            async def process_trait(trait, i):
+                temp_image = await asyncio.to_thread(helpers.trait_image, trait['name'], trait['style'], self.trait_icon_mapping)
                 if temp_image:
                     temp_image = temp_image.convert("RGBA")
                     mask = temp_image.split()[3]
                     trait_final_image.paste(temp_image, (89 * i, 0), mask)
 
+            # Fetch trait images concurrently
+            await asyncio.gather(*[process_trait(trait, i) for i, trait in enumerate(sorted_traits)])
+
             # --- Champions Processing ---
             units = participant.get('units', [])
-            champ_img_width = 0
-            champ_img_height = 140
-            champ_unit_data = []
+            champ_unit_data_unsorted = []
 
-            for unit in units:
+            async def process_unit(unit):
                 champion_name = unit["character_id"]
                 tier = unit["tier"]
                 rarity = unit["rarity"]
@@ -156,50 +172,57 @@ class BotCommands(commands.Cog):
 
                 custom_rarity = dicts.rarity_map.get(rarity, rarity)
                 champ_icon_path = helpers.get_champ_icon(self.champ_mapping, champion_name).lower()
+                rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
+
                 if champ_icon_path:
-                    champion_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + champ_icon_path + ".png"
-                    champion_response = requests.get(champion_url)
-                    icon = Image.open(BytesIO(champion_response.content)).convert("RGBA")
-                    icon_resized = icon.resize((64, 64), Image.LANCZOS)
+                    champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
+                    champ_task = fetch_image(champion_url, (64, 64))
+                    rarity_task = fetch_image(rarity_url, (72, 72))
+                    
+                    icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
 
-                    rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
-                    rarity_response = requests.get(rarity_url)
-                    rarity_border = Image.open(BytesIO(rarity_response.content)).convert("RGBA")
-                    rarity_resized = rarity_border.resize((72, 72), Image.LANCZOS)
-
-                    champ_img_width += 72
-                    champ_unit_data.append({
+                    champ_unit_data_unsorted.append({
                         "champion_name": champion_name,
                         "icon_resized": icon_resized,
                         "rarity_resized": rarity_resized,
+                        "rarity": rarity,
                         "tier": tier,
-                        "item_names": item_names
+                        "item_names": item_names,
+                        "width": 72  # Store individual width
                     })
 
-            # Create Champion Image
-            champ_final_image = Image.new("RGBA", (champ_img_width, champ_img_height), (0, 0, 0, 0))
-            current_x = 0
+            # Fetch all champion icons & rarity images concurrently
+            await asyncio.gather(*[process_unit(unit) for unit in units])
+            champ_unit_data = sorted(champ_unit_data_unsorted, key=lambda x: x['rarity'])
 
-            for unit in champ_unit_data:
+            # Calculate total champion image width
+            champ_img_width = sum(unit['width'] for unit in champ_unit_data)
+            champ_img_height = 140
+            champ_final_image = Image.new("RGBA", (champ_img_width, champ_img_height), (0, 0, 0, 0))
+
+            # --- Paste Champions & Items ---
+            async def paste_champion(unit, current_x):
                 champ_final_image.paste(unit["rarity_resized"], (current_x, 25), unit["rarity_resized"])
                 champ_final_image.paste(unit["icon_resized"], (current_x + 4, 29), unit["icon_resized"])
 
                 if unit["tier"] in {2, 3}:
                     tier_icon_path = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{unit['tier']}.png"
-                    tier_response = requests.get(tier_icon_path)
-                    tier_icon = Image.open(BytesIO(tier_response.content)).convert("RGBA")
-                    tier_resized = tier_icon.resize((72, 36), Image.LANCZOS)
+                    tier_resized = await fetch_image(tier_icon_path, (72, 36))
                     champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
 
-                for i, item_name in enumerate(unit["item_names"]):
-                    item_icon_path = helpers.get_item_icon(self.item_mapping, item_name).lower()
-                    item_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + item_icon_path
-                    item_response = requests.get(item_url)
-                    item_icon = Image.open(BytesIO(item_response.content)).convert("RGBA")
-                    item_resized = item_icon.resize((23, 23), Image.LANCZOS)
-                    champ_final_image.paste(item_resized, (current_x + 23 * i, 97), item_resized)
+                item_urls = [
+                    f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_item_icon(self.item_mapping, item).lower()}"
+                    for item in unit["item_names"]
+                ]
 
-                current_x += 72
+                fetch_tasks = [fetch_image(url, (23, 23)) for url in item_urls]
+                item_icons = await asyncio.gather(*fetch_tasks)
+
+                for i, item_icon in enumerate(item_icons):
+                    champ_final_image.paste(item_icon, (current_x + 23 * i, 97), item_icon)
+
+            # Process and paste champions concurrently
+            await asyncio.gather(*[paste_champion(unit, x) for unit, x in zip(champ_unit_data, range(0, champ_img_width, 72))])
 
             # --- Combine Images ---
             final_img_height = trait_img_height + champ_img_height
@@ -207,9 +230,10 @@ class BotCommands(commands.Cog):
             final_combined_image.paste(trait_final_image, (0, 0), trait_final_image)
             final_combined_image.paste(champ_final_image, (0, trait_img_height), champ_final_image)
 
-            # Get summoner's gameName and tagLine from the match_info
+             # Get summoner's gameName and tagLine from the match_info
             gameName = participant.get('riotIdGameName', 'Unknown')
             tagLine = participant.get('riotIdTagline', 'Unknown')
+
             # Save & Return Image & Embed
             final_combined_image.save("player_board.png")
             file = discord.File("player_board.png", filename="player_board.png")
@@ -318,8 +342,6 @@ class BotCommands(commands.Cog):
             color=discord.Color.blue()
         )
         await ctx.send(embed=lb_embed)
-
-
 
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
     @commands.command()
