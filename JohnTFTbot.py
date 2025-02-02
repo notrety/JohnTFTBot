@@ -272,7 +272,6 @@ def last_match(gameName, tagLine, mode):
             mode = mode.lower()
             print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
             return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, 0
-
         # Fetch match details
         match_info = tft_watcher.match.by_id(region, match_id)
         players_data = []
@@ -281,11 +280,25 @@ def last_match(gameName, tagLine, mode):
 
         # Find player stats
         for participant in match_info['info']['participants']:
-            puuid = participant['puuid']
-            player_elos += calculate_elo(puuid)
+            player_puuid = participant['puuid']
+            placement = participant['placement']
+
+            # Check elos of all players to calculate average
+            summoner = tft_watcher.summoner.by_puuid(region, player_puuid)
+            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    tier = entry['tier']
+                    rank = entry['rank']
+                    tier_and_rank = tier + " " + rank
+                    lp = entry['leaguePoints']
+            
+            player_elos += rank_to_elo[tier_and_rank]
+            player_elos += int(lp)
 
             # Fetch gameName and tagLine from PUUID
-            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{puuid}?api_key={riot_token}"
+            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
             response = requests.get(riot_id_url)
             riot_id_info = response.json()
 
@@ -314,7 +327,7 @@ def last_match(gameName, tagLine, mode):
             avg_rank = keys[0]
         # Format the message
         result = ""
-
+        print("avg elo calced")
         for placement, name in players_data:
             full_name = gameName + "#" + tagLine
             if custom_equal(full_name, name, "_ "):
@@ -327,7 +340,6 @@ def last_match(gameName, tagLine, mode):
                     result += f"🏆 **{placement}** - {name}\n"
                 else:
                     result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
-
         return result, match_id, avg_rank, master_plus_lp
 
     except Exception as err:
@@ -628,26 +640,6 @@ async def r(ctx, *args):
     # --- Send Initial Message ---
     embed, file = await generate_board(current_index)
     await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index))
-    
-# Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
-@bot.command()
-async def commands(ctx): 
-    commands_embed = discord.Embed(
-    title=f"Commands List",
-    description=f"""
-**!r** - View most recent ranked match\n
-**!rn** - View most recent normal match\n
-**!rh** - View most recent hyper roll match\n
-**!rd** - View most recent double up match\n
-**!rg** - View most recent game mode match\n
-**!stats** - Check ranked stats for a player\n
-**!ping** - Test that bot is active\n
-**!commands** - Get a list of all commands\n
-**!link** - Link discord account to riot account
-    """,
-    color=discord.Color.blue()
-    )
-    await ctx.send(embed=commands_embed)
 
 # Command to link riot and discord accounts, stored in mongodb database
 @bot.command()
