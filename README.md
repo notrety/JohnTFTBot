@@ -1,6 +1,6 @@
 # TFT Discord Bot
 
-A Discord bot designed to provide **real-time TFT (Teamfight Tactics)** match information, player statistics, and an overall leaderboard to your server. It was created by **Michael Yin** and **Felix Sosa**.
+A Discord bot designed to provide **real-time TFT (Teamfight Tactics)** match information, player statistics, and a leaderboard of all users. It was created by **Michael Yin** and **Felix Sosa**.
 
 ---
 
