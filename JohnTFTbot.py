@@ -261,6 +261,7 @@ def last_match(gameName, tagLine, mode):
                     break
         if not match_found:
             mode = mode.lower()
+            print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
             return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, 0
 
         # Fetch match details
@@ -335,6 +336,7 @@ def last_match(gameName, tagLine, mode):
         return result, match_id, avg_rank, master_plus_lp
 
     except Exception as err:
+        print(f"Error fetching last match for {gameName}#{tagLine}: {err}")
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, 0
 
 # Custom equal to handle spaces in usernames
@@ -515,7 +517,6 @@ async def r(ctx, *args):
     current_index = puuid_list.index(puuid)
 
     async def generate_board(index):
-        new_puuid = puuid_list[index]
         participant = participants_sorted[index]
 
         # --- Traits Processing ---
