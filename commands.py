@@ -96,7 +96,7 @@ class BotCommands(commands.Cog):
             return
 
         # Fetch match data asynchronously
-        result, match_id, avg_rank, master_plus_lp = await asyncio.to_thread(
+        result, match_id, avg_rank, master_plus_lp, time = await asyncio.to_thread(
             helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region
         )
 
@@ -105,7 +105,7 @@ class BotCommands(commands.Cog):
             description=result,
             color=discord.Color.blue()
         )
-        embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP" if master_plus_lp else f"Average Lobby Rank: {avg_rank}")
+        embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
         await ctx.send(embed=embed)
 
         match_info = await asyncio.to_thread(

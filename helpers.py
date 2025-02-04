@@ -3,6 +3,8 @@
 import discord
 import requests
 import dicts
+import time
+from datetime import datetime
 from PIL import Image
 from io import BytesIO
 
@@ -100,14 +102,14 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
     puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
 
     try:
         # Fetch the latest 20 matches
         match_list = tft_watcher.match.by_puuid(region, puuid, count=20)
         if not match_list:
             print(f"No matches found for {gameName}#{tagLine}.")
-            return f"No matches found for {gameName}#{tagLine}.", None, None, 0
+            return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
 
         match_id = None
         match_found = False
@@ -126,13 +128,20 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
         if not match_found:
             mode = mode.lower()
             print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
-            return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None, 0
+            return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None, 0, None
 
         # Fetch match details
         match_info = tft_watcher.match.by_id(region, match_id)
         players_data = []
         
         player_elos = 0
+
+        # Get timestamp to include in response
+        timestamp = match_info['info']['game_datetime'] / 1000 # unix timestamp, divide by 1000 because its in milliseconds
+        time = datetime.fromtimestamp(timestamp) # convert to time object
+        formatted_time = time.strftime('%Y-%m-%d %H:%M:%S') # format nicely
+        time_passed = time_ago(timestamp)
+        time_and_time_ago = formatted_time + ", " + time_passed
 
         # Find player stats
         for participant in match_info['info']['participants']:
@@ -201,11 +210,11 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
                 else:
                     result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
 
-        return result, match_id, avg_rank, master_plus_lp
+        return result, match_id, avg_rank, master_plus_lp, time_and_time_ago
     
     except Exception as err:
         print(f"Error fetching last match for {gameName}#{tagLine}: {err}")
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Custom equal to handle spaces in usernames
 def custom_equal(str1, str2, chars_to_ignore):
@@ -280,3 +289,42 @@ def trait_image(trait_name: str, style: int, trait_icon_mapping):
     except Exception as e:
         print(f"Error in trait_image for {trait_name} (style {style}): {e}")
         return None
+
+# Calculate how long ago timestamp was to include in !r response
+def time_ago(timestamp):
+    # Get the current time in Unix timestamp format
+    current_time = time.time()
+    
+    # Calculate the difference between the current time and the given timestamp
+    time_difference = current_time - timestamp
+
+    # Define time units in seconds
+    seconds_in_minute = 60
+    seconds_in_hour = seconds_in_minute * 60
+    seconds_in_day = seconds_in_hour * 24
+    seconds_in_week = seconds_in_day * 7
+    seconds_in_month = seconds_in_day * 30
+    seconds_in_year = seconds_in_day * 365
+    
+    # Check which time unit is appropriate for the difference
+    if time_difference < seconds_in_minute:
+        return f"{int(time_difference)} seconds ago"
+    elif time_difference < seconds_in_hour:
+        minutes = time_difference // seconds_in_minute
+        return f"{int(minutes)} minutes ago"
+    elif time_difference < seconds_in_day:
+        hours = time_difference // seconds_in_hour
+        return f"{int(hours)} hours ago"
+    elif time_difference < seconds_in_week:
+        days = time_difference // seconds_in_day
+        return f"{int(days)} days ago"
+    elif time_difference < seconds_in_month:
+        weeks = time_difference // seconds_in_week
+        return f"{int(weeks)} weeks ago"
+    elif time_difference < seconds_in_year:
+        months = time_difference // seconds_in_month
+        return f"{int(months)} months ago"
+    else:
+        years = time_difference // seconds_in_year
+        return f"{int(years)} years ago"
+
