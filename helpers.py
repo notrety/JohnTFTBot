@@ -97,7 +97,7 @@ def get_rank_embed(gameName, tagLine, mass_region, riot_token, tft_watcher, regi
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
 # Function to grab previous match data
-def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region):
+def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region, game_num):
 
     puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
@@ -110,18 +110,28 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
         if not match_list:
             print(f"No matches found for {gameName}#{tagLine}.")
             return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
+        if game_num > 20 or game_num < 0:
+            print(f"Please enter a number between 1 and 20.")
+            return f"Please enter a number between 1 and 20.", None, None, 0, None
+        elif game_num > len(match_list) and game_num <= 20:
+            print(f"Not enough {mode} matches found for {gameName}#{tagLine}.")
+            return f"Not enough {mode} matches found for {gameName}#{tagLine}.", None, None, 0, None
 
         match_id = None
         match_found = False
         for index, match in enumerate(match_list):
             match_info = tft_watcher.match.by_id(region, match)
             if mode == "GameMode":
-                if match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
+                if game_num > 1:
+                    game_num -= 1
+                elif match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
                     match_id = match_list[index]  # Get the latest match ID
                     match_found = True
                     break
             else:
-                if match_info['info']['queue_id'] == dicts.game_type_to_id[mode]:
+                if game_num > 1:
+                    game_num -= 1
+                elif match_info['info']['queue_id'] == dicts.game_type_to_id[mode]:
                     match_id = match_list[index]  # Get the latest match ID
                     match_found = True
                     break

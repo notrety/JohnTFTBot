@@ -1,3 +1,4 @@
+import re
 import discord
 import requests
 import helpers
@@ -72,8 +73,22 @@ class BotCommands(commands.Cog):
         else:
             game_type = "Ranked"
 
+        match_index = 1
         data = False
-        if len(args) == 2:  # Expecting name and tagline
+        if len(args) == 3:  # Expecting match num, name and tagline
+            match_index = int(args[0])
+            gameName = args[1]
+            tagLine = args[2]
+            data = True
+        elif len(args) == 2 and args[1].startswith("<@"):  # Check if it's a mention
+            match_index = int(args[0])
+            mentioned_user = args[1]
+            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+            # Check if user is linked
+            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            if not data:
+                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+        elif len(args) == 2:
             gameName = args[0]
             tagLine = args[1]
             data = True
@@ -84,20 +99,26 @@ class BotCommands(commands.Cog):
             data, gameName, tagLine = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+        elif len(args) == 1 and str.isnumeric(args[0]):
+            match_index = int(args[0])
+            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            if not data:
+                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
             data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
         else: 
             # User formatted command incorrectly, let them know
-            await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
+            await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n
+You can also add a number as the first argument to specify which match you are looking for.""")
 
         if not data:
             return
 
         # Fetch match data asynchronously
         result, match_id, avg_rank, master_plus_lp, time = await asyncio.to_thread(
-            helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region
+            helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region, match_index
         )
 
         embed = discord.Embed(
@@ -350,11 +371,7 @@ class BotCommands(commands.Cog):
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""
-    **!r** - View most recent ranked match\n
-    **!rn** - View most recent normal match\n
-    **!rh** - View most recent hyper roll match\n
-    **!rd** - View most recent double up match\n
-    **!rg** - View most recent game mode match\n
+    **!r** - View most recent match\n
     **!stats** - Check ranked stats for a player\n
     **!lb** - View overall bot leaderboard\n
     **!ping** - Test that bot is active\n
