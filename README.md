@@ -8,7 +8,7 @@ A Discord bot designed to provide **real-time TFT (Teamfight Tactics)** match in
 
 - **Recent Match Information**: Get the latest match results of a player in Teamfight Tactics.
 - **Player Stats**: View detailed stats of any player, including their rank, games played, top 4 rate, and more.
-- **Leaderboard**: Check the overall leaderboard of all users of the bot to see how players rank .
+- **Leaderboard**: Check the overall leaderboard of all users of the bot to see how players rank.
 
 ---
 
