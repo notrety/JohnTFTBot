@@ -147,6 +147,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
         for participant in match_info['info']['participants']:
             player_puuid = participant['puuid']
             placement = participant['placement']
+            rank_icon = None
 
             # Check elos of all players to calculate average
             summoner = tft_watcher.summoner.by_puuid(region, player_puuid)
@@ -164,6 +165,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
             if not tier_and_rank == "":
                 player_elos += dicts.rank_to_elo[tier_and_rank]
                 player_elos += int(lp)
+                rank_icon = dicts.tier_to_rank_icon[tier]
             else: 
                 ranked_players-=1
 
@@ -178,7 +180,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
                 player_name = "Unknown Player"
 
             # Store placement & name
-            players_data.append((placement, player_name))
+            players_data.append((placement, player_name, rank_icon))
 
         # Sort players by placement
         players_data.sort()
@@ -197,18 +199,12 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
             avg_rank = keys[0]
         # Format the message
         result = ""
-        for placement, name in players_data:
+        for placement, name, icon in players_data:
             full_name = gameName + "#" + tagLine
             if custom_equal(full_name, name, "_ "):
-                if placement != 8:
-                    result += f"🏆 **{placement}** - **__{name}__**\n"
-                else:
-                    result += f"<:rety:1229135551714824354> **{placement}** - **__{name}__**\n"
+                result += f"{icon} **{placement}** - **__{name}__**\n"
             else:
-                if placement != 8:
-                    result += f"🏆 **{placement}** - {name}\n"
-                else:
-                    result += f"<:rety:1229135551714824354> **{placement}** - {name}\n"
+                result += f"{icon} **{placement}** - {name}\n"
 
         return result, match_id, avg_rank, master_plus_lp, time_and_time_ago
     

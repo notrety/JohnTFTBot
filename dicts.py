@@ -76,3 +76,17 @@ rarity_map = {
     0: 1,
     9: 1
 }
+
+# Map tier to rank_icon emotes
+tier_to_rank_icon = {
+    "IRON": "<:RankIron:1336405365226733620>",
+    "BRONZE": "<:RankBronze:1336405390270660708>",
+    "SILVER": "<:RankSilver:1336405406007951481>",
+    "GOLD": "<:RankGold:1336405422957007000>",
+    "PLATINUM": "<:RankPlatinum:1336405442301268109>",
+    "EMERALD": "<:RankEmerald:1336405459032342598>",
+    "DIAMOND": "<:RankDiamond:1336405480590938235>",
+    "MASTER": "<:RankMaster:1336405497162502174>",
+    "GRANDMASTER": "<:RankGrandmaster:1336405512887078923>",
+    "CHALLENGER": "<:RankChallenger:1336405530444431492>",
+}
