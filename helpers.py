@@ -8,6 +8,27 @@ from datetime import datetime
 from PIL import Image
 from io import BytesIO
 
+# Function to return cutoff lp for challenger and grandmaster
+def get_cutoff(tft_watcher, region):
+
+    # grab all players who are challenger, grandmaster, and master
+    challengers = tft_watcher.league.challenger(region)['entries']
+    grandmasters = tft_watcher.league.grandmaster(region)['entries']
+    masters = tft_watcher.league.master(region)['entries']
+    
+    # put all the lps into a list
+    lps = [entry.get('leaguePoints') for entry in challengers]
+    lps.extend(entry.get('leaguePoints') for entry in grandmasters)
+    lps.extend(entry.get('leaguePoints') for entry in masters)
+
+    # sort lps 
+    lps_sorted = sorted(lps, reverse=True)
+
+    # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
+    challenger_cutoff = max(500,lps_sorted[249])
+    grandmaster_cutoff = max(200,lps_sorted[749])
+    return challenger_cutoff, grandmaster_cutoff
+
 # Function to get the trait icon path
 def get_trait_icon(traits_data, traitName):
     for trait in traits_data:

@@ -365,6 +365,17 @@ You can also add a number as the first argument to specify which match you are l
         )
         await ctx.send(embed=lb_embed)
 
+    # Commnad to check the lp cutoff for challenger and grandmaster
+    @commands.command(name="cutoff", aliases=["cutoffs, challenger, grandmaster, grandmasters, lpcutoff"])
+    async def cutoff(self, ctx):
+        challenger_cutoff, grandmaster_cutoff = helpers.get_cutoff(self.tft_watcher, self.region)
+        cutoff_embed = discord.Embed(
+            title=f"Cutoff LPs",
+            description=f"<:RankChallenger:1336405530444431492> Challenger Cutoff: {challenger_cutoff}\n<:RankGrandmaster:1336405512887078923> Grandmaster Cutoff: {grandmaster_cutoff}",
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=cutoff_embed)
+
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
     @commands.command()
     async def commands(self, ctx): 
@@ -376,7 +387,8 @@ You can also add a number as the first argument to specify which match you are l
     **!lb** - View overall bot leaderboard\n
     **!ping** - Test that bot is active\n
     **!commands** - Get a list of all commands\n
-    **!link** - Link discord account to riot account
+    **!link** - Link discord account to riot account\n
+    **!cutoff** - Show the LP cutoffs for Challenger and GM
         """,
         color=discord.Color.blue()
         )
