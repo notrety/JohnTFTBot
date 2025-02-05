@@ -354,9 +354,9 @@ You can also add a number as the first argument to specify which match you are l
                     icon = dicts.tier_to_rank_icon[tier]
             
             if name == gameName and tag == tagLine:
-                result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {tier} {division} {lp} LP**\n"
+                result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {tier} {division} • {lp} LP**\n"
             else:
-                result += f"**{index + 1}** - {name_and_tag}: {icon} {tier} {division} {lp} LP\n"
+                result += f"**{index + 1}** - {name_and_tag}: {icon} {tier} {division} • {lp} LP\n"
         
         lb_embed = discord.Embed(
             title=f"Overall Bot Ranked Leaderboard",
