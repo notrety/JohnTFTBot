@@ -233,10 +233,7 @@ You can also add a number as the first argument to specify which match you are l
                     tier_resized = await fetch_image(tier_icon_path, (72, 36))
                     champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
 
-                item_urls = [
-                    f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_item_icon(self.item_mapping, item).lower()}"
-                    for item in unit["item_names"]
-                ]
+                item_urls = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_item_icon(self.item_mapping, item).lower()}" for item in unit["item_names"]]
 
                 fetch_tasks = [fetch_image(url, (23, 23)) for url in item_urls]
                 item_icons = await asyncio.gather(*fetch_tasks)
@@ -265,21 +262,25 @@ You can also add a number as the first argument to specify which match you are l
 
             return embed, file
 
-            # --- Button View ---
+        Select_options = [
+            discord.SelectOption(label=f"{index + 1} - {participant.get('riotIdGameName')}#{participant.get('riotIdTagline')}", value=index)
+            for index, participant in enumerate(participants_sorted)
+        ]
+
+        # --- Dropdown View ---
         class PlayerSwitchView(View):
             def __init__(self, index, author_id):
                 super().__init__()
                 self.index = index
                 self.author_id = author_id
 
-            @discord.ui.button(label="Next Player", style=discord.ButtonStyle.primary)
-            async def next_player(self, interaction: discord.Interaction, button: discord.ui.Button):  
+            @discord.ui.select(placeholder="Select a board to view", options=Select_options, max_values= 1)
+            async def next_player(self, interaction: discord.Interaction, select: discord.ui.Select):  
                 if interaction.user.id != self.author_id:
-                    await interaction.response.send_message("You cannot use this button!", ephemeral=True)
+                    await interaction.response.send_message("You cannot use this dropdown!", ephemeral=True)
                     return
                 await interaction.response.defer()  # Avoid timeout
-
-                new_index = (self.index + 1) % 8  # Loop through players
+                new_index = int(interaction.data['values'][0])
                 new_embed, new_file = await generate_board(new_index)
 
                 # Update the message with new data

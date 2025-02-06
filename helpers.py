@@ -57,8 +57,8 @@ def get_item_icon(items_data, itemName):
             if item.get("nameId") == itemName:
                 print("Item Found")
                 return item.get("squareIconPath", "")[21:]
-    print("Item Not Found")
-    return None
+    print(f"{itemName} Not Found")
+    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
 
 # Function to fetch PUUID
 def get_puuid(gameName, tagLine, mass_region, riot_watcher):
