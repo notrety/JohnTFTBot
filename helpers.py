@@ -61,28 +61,44 @@ def get_item_icon(items_data, itemName):
     return None
 
 # Function to fetch PUUID
-def get_puuid(gameName, tagLine, mass_region, riot_token):
+def get_puuid(gameName, tagLine, mass_region, riot_watcher):
     try:
-        api_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{gameName}/{tagLine}?api_key={riot_token}"
-        resp = requests.get(api_url)
-        player_info = resp.json()
-        return player_info.get('puuid')
+        info = riot_watcher.account.by_riot_id(mass_region, gameName, tagLine)
+        return info['puuid']
     except Exception as err:
         print("Failed to retrieve PUUID for {gameName}#{tagLine}.")
         return None
 
 # Function to calculate ranked elo based on given PUUID
 def calculate_elo(puuid, tft_watcher, region):
-    summoner = tft_watcher.summoner.by_puuid(region, puuid)
-    rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+    attempts = 0
 
-    for entry in rank_info:
-        if entry['queueType'] == 'RANKED_TFT':
-            return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+    while True:
+        try:
+            # Fetch summoner data
+            summoner = tft_watcher.summoner.by_puuid(region, puuid)
+            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+
+            # Find Ranked TFT entry
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+
+            return 0  # If no ranked TFT entry is found
+
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                retry_after = int(e.response.headers.get("Retry-After", 5))  # Get wait time
+                wait_time = min(5 * (2 ** attempts), 60)  # Exponential backoff (max 60s)
+                print(f"Rate limited! Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                attempts += 1
+            else:
+                raise e  # Re-raise other errors
 
 # Function to get rank info from puuid and return embed with rank icon
-def get_rank_embed(gameName, tagLine, mass_region, riot_token, tft_watcher, region):
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
+def get_rank_embed(gameName, tagLine, mass_region, riot_watcher, tft_watcher, region):
+    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
     if not puuid:
         return None, f"Could not find PUUID for {gameName}#{tagLine}."
 
@@ -118,9 +134,9 @@ def get_rank_embed(gameName, tagLine, mass_region, riot_token, tft_watcher, regi
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
 # Function to grab previous match data
-def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region, game_num):
+def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, region, game_num):
 
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
+    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
@@ -201,9 +217,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
                 ranked_players-=1
 
             # Fetch gameName and tagLine from PUUID
-            riot_id_url = f"https://{mass_region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{player_puuid}?api_key={riot_token}"
-            response = requests.get(riot_id_url)
-            riot_id_info = response.json()
+            riot_id_info = riot_watcher.account.by_puuid(mass_region, player_puuid)
 
             if 'gameName' in riot_id_info and 'tagLine' in riot_id_info:
                 player_name = f"{riot_id_info['gameName']}#{riot_id_info['tagLine']}"

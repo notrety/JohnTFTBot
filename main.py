@@ -2,7 +2,7 @@ import discord
 import requests
 import os
 from discord.ext import commands
-from riotwatcher import TftWatcher
+from riotwatcher import RiotWatcher, TftWatcher
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
 
@@ -72,8 +72,10 @@ region = "na1"
 
 # Initialize Riot API Wrapper
 tft_watcher = TftWatcher(riot_token)
+riot_watcher = RiotWatcher(riot_token)
 
 bot.tft_watcher = tft_watcher
+bot.riot_watcher = riot_watcher
 bot.collection = collection
 bot.region = region
 bot.mass_region = mass_region

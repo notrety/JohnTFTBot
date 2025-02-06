@@ -5,6 +5,7 @@ import helpers
 import dicts
 import asyncio
 import random
+import time
 from discord.ui import View
 from discord.ext import commands
 from PIL import Image
@@ -12,9 +13,10 @@ from io import BytesIO
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
-    def __init__(self, bot, tft_watcher, collection, region, mass_region, champ_mapping, item_mapping, riot_token, trait_icon_mapping):
+    def __init__(self, bot, tft_watcher, riot_watcher, collection, region, mass_region, champ_mapping, item_mapping, riot_token, trait_icon_mapping):
         self.bot = bot
         self.tft_watcher = tft_watcher
+        self.riot_watcher = riot_watcher
         self.collection = collection
         self.region = region
         self.mass_region = mass_region
@@ -52,7 +54,7 @@ class BotCommands(commands.Cog):
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
         if data:
-            rank_embed, error_message = helpers.get_rank_embed(gameName, tagLine, self.mass_region, self.riot_token, self.tft_watcher, self.region)  # Unpack tuple
+            rank_embed, error_message = helpers.get_rank_embed(gameName, tagLine, self.mass_region, self.riot_watcher, self.tft_watcher, self.region)  # Unpack tuple
 
             if error_message:
                 await ctx.send(error_message)  # Send error as text
@@ -118,7 +120,7 @@ You can also add a number as the first argument to specify which match you are l
 
         # Fetch match data asynchronously
         result, match_id, avg_rank, master_plus_lp, time = await asyncio.to_thread(
-            helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region, match_index
+            helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_watcher, self.tft_watcher, self.region, match_index
         )
 
         embed = discord.Embed(
@@ -135,7 +137,7 @@ You can also add a number as the first argument to specify which match you are l
         participants = match_info['info']['participants']
 
         puuid = await asyncio.to_thread(
-            helpers.get_puuid, gameName, tagLine, self.mass_region, self.riot_token
+            helpers.get_puuid, gameName, tagLine, self.mass_region, self.riot_watcher
         )
 
         # Sort in ascending order
@@ -315,35 +317,41 @@ You can also add a number as the first argument to specify which match you are l
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command()
     async def lb(self, ctx):
+        start_time = time.perf_counter()  # Start time
         _, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
         result = ""
+
         all_users = self.collection.find()
-        
         # Create a list to store all users' elo and name
         user_elo_and_name = []
-        
-        for user in all_users:
+        async def add_user(user):
             name = user['name']
             tag = user['tag']
-            puuid = helpers.get_puuid(name, tag, self.mass_region, self.riot_token)
+
+            puuid = await asyncio.to_thread(helpers.get_puuid, name, tag, self.mass_region, self.riot_watcher)
             
             if not puuid:
                 await ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
-                continue  # Skip to the next user if there's an issue retrieving the PUUID
             
-            user_elo = helpers.calculate_elo(puuid, self.tft_watcher, self.region)
+            user_elo = await asyncio.to_thread(helpers.calculate_elo, puuid, self.tft_watcher, self.region)
             name_and_tag = name + "#" + tag
             
             # Append each user's data (elo, name_and_tag) to the list
-            user_elo_and_name.append((user_elo, name_and_tag))
-        
+            user_elo_and_name.append((user_elo, name_and_tag, puuid))
+
+        await asyncio.gather(*[add_user(user) for user in all_users])
+
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
         
+        end_time = time.perf_counter()
+        execution_time = end_time - start_time
+        print(execution_time)
+
         # Prepare the leaderboard result
-        for index, (user_elo, name_and_tag) in enumerate(user_elo_and_name):
+        for index, (user_elo, name_and_tag, puuid) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
-            summoner = self.tft_watcher.summoner.by_puuid(self.region, helpers.get_puuid(name, tag, self.mass_region, self.riot_token))
+            summoner = self.tft_watcher.summoner.by_puuid(self.region, puuid)
             rank_info = self.tft_watcher.league.by_summoner(self.region, summoner['id'])
             
             for entry in rank_info:
@@ -357,12 +365,15 @@ You can also add a number as the first argument to specify which match you are l
                 result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {tier} {division} • {lp} LP**\n"
             else:
                 result += f"**{index + 1}** - {name_and_tag}: {icon} {tier} {division} • {lp} LP\n"
-        
+ 
         lb_embed = discord.Embed(
             title=f"Overall Bot Ranked Leaderboard",
             description=result,
             color=discord.Color.blue()
         )
+        end_time = time.perf_counter()
+        execution_time = end_time - start_time
+        print(execution_time)
         await ctx.send(embed=lb_embed)
 
     # Commnad to check the lp cutoff for challenger and grandmaster
@@ -414,5 +425,5 @@ You can also add a number as the first argument to specify which match you are l
 
 # Add this class as a cog to main
 async def setup(bot):
-    await bot.add_cog(BotCommands(bot, bot.tft_watcher, bot.collection, bot.region, 
+    await bot.add_cog(BotCommands(bot, bot.tft_watcher, bot.riot_watcher, bot.collection, bot.region, 
                                   bot.mass_region, bot.champ_mapping, bot.item_mapping, bot.riot_token, bot.trait_icon_mapping))
