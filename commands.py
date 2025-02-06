@@ -4,7 +4,7 @@ import requests
 import helpers
 import dicts
 import asyncio
-import aiohttp
+import random
 from discord.ui import View
 from discord.ext import commands
 from PIL import Image
@@ -376,6 +376,23 @@ You can also add a number as the first argument to specify which match you are l
         )
         await ctx.send(embed=cutoff_embed)
 
+    # Roll command 
+    @commands.command()
+    async def roll(self, ctx, *args):
+        user = ctx.author.id
+        roll_result = random.randint(1,100)
+        if(args):
+            if(args[0].isdigit()):
+                max = int(args[0])
+                if(max > 0):
+                    roll_result = random.randint(1,max)
+
+        roll_embed = discord.Embed(
+            description=f"<@{user}> rolled a {roll_result}",
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=roll_embed)
+
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
     @commands.command()
     async def commands(self, ctx): 
@@ -388,7 +405,8 @@ You can also add a number as the first argument to specify which match you are l
     **!ping** - Test that bot is active\n
     **!commands** - Get a list of all commands\n
     **!link** - Link discord account to riot account\n
-    **!cutoff** - Show the LP cutoffs for Challenger and GM
+    **!cutoff** - Show the LP cutoffs for Challenger and GM\n
+    **!roll** - Rolls a random number (default 1-100)
         """,
         color=discord.Color.blue()
         )
