@@ -459,7 +459,7 @@ You can also add a number as the first argument to specify which match you are l
 You can also add a number as the first argument to specify how many matches to include.""")
 
         if data:
-            error_message, placements, real_num_matches = helpers.recent_matches(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region, num_matches)  # Unpack tuple
+            error_message, placements, real_num_matches = helpers.recent_matches(gameName, tagLine, game_type, self.mass_region, self.riot_watcher, self.tft_watcher, self.region, num_matches)  # Unpack tuple
 
             if error_message:
                 await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed

@@ -260,9 +260,9 @@ def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, 
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Get recent x matches
-def recent_matches(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region, num_matches):
+def recent_matches(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, region, num_matches):
 
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
+    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
