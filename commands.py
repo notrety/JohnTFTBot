@@ -1,4 +1,3 @@
-import re
 import discord
 import requests
 import helpers
@@ -393,20 +392,101 @@ You can also add a number as the first argument to specify which match you are l
         )
         await ctx.send(embed=roll_embed)
 
+    # History command 
+    @commands.command(name="h", aliases=["history","hr","hn","hh","hd","hg"])
+    async def history(self, ctx, *args):
+        if ctx.invoked_with == "hn":
+            game_type = "Normal"
+        elif ctx.invoked_with == "hg":
+            game_type = "Gamemode"
+        elif ctx.invoked_with == "hh":
+            game_type = "Hyper Roll"
+        elif ctx.invoked_with == "hd":
+            game_type = "Double Up"
+        else:
+            game_type = "Ranked"
+
+        num_matches = 20
+        data = False
+        if len(args) == 3:  # Expecting matches to display, name and tagline
+            num_matches = int(args[0])
+            gameName = args[1]
+            tagLine = args[2]
+            data = True
+        elif len(args) == 2 and args[1].startswith("<@"):  # Check if it's a mention
+            num_matches = int(args[0])
+            mentioned_user = args[1]
+            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+            # Check if user is linked
+            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            if not data:
+                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+        elif len(args) == 2:
+            gameName = args[0]
+            tagLine = args[1]
+            data = True
+        elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
+            mentioned_user = args[0]
+            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+            # Check if user is linked
+            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            if not data:
+                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+        elif len(args) == 1 and str.isnumeric(args[0]):
+            num_matches = int(args[0])
+            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            if not data:
+                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+        elif len(args) == 0: # Check for linked account by sender
+            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            if not data:
+                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+        else: 
+            # User formatted command incorrectly, let them know
+            await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n
+You can also add a number as the first argument to specify how many matches to include.""")
+
+        if data:
+            error_message, placements, real_num_matches = helpers.recent_matches(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.tft_watcher, self.region, num_matches)  # Unpack tuple
+
+            if error_message:
+                await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed
+            else:
+                top4s = 0
+                firsts = 0
+                total_placement = 0
+                text = ""
+                for placement in placements:
+                    text += str(placement) + " "
+                    total_placement += placement
+                    if int(placement) <= 4:
+                        top4s += 1
+                        if int(placement) == 1:
+                            firsts += 1
+                avg_placement = round(total_placement / len(placements), 1)
+                text += f"\nFirsts: {firsts}\nTop 4s: {top4s}\nAverage Placement: {avg_placement}"
+                embed = discord.Embed(
+                    title=f"Recent {real_num_matches} {game_type} Matches for {gameName}#{tagLine}",
+                    description=text,
+                    color=discord.Color.blue()
+                )
+                await ctx.send(embed=embed)  # Send embed
+
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
     @commands.command()
     async def commands(self, ctx): 
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""
-    **!r** - View most recent match\n
-    **!stats** - Check ranked stats for a player\n
-    **!lb** - View overall bot leaderboard\n
-    **!ping** - Test that bot is active\n
-    **!commands** - Get a list of all commands\n
-    **!link** - Link discord account to riot account\n
-    **!cutoff** - Show the LP cutoffs for Challenger and GM\n
-    **!roll** - Rolls a random number (default 1-100)
+**!r** - View most recent match\n
+**!stats** - Check ranked stats for a player\n
+**!lb** - View overall bot leaderboard\n
+**!ping** - Test that bot is active\n
+**!commands** - Get a list of all commands\n
+**!link** - Link discord account to riot account\n
+**!cutoff** - Show the LP cutoffs for Challenger and GM\n
+**!roll** - Rolls a random number (default 1-100)\n
+**!h** - Display recent placements for a player
         """,
         color=discord.Color.blue()
         )

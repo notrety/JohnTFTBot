@@ -119,7 +119,7 @@ def get_rank_embed(gameName, tagLine, mass_region, riot_token, tft_watcher, regi
 
 # Function to grab previous match data
 def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region, game_num):
-
+    print(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region, game_num)
     puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
@@ -127,7 +127,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
 
     try:
         # Fetch the latest 20 matches
-        match_list = tft_watcher.match.by_puuid(region, puuid, count=20)
+        match_list = tft_watcher.match.by_puuid(region, puuid, count=30)
         if not match_list:
             print(f"No matches found for {gameName}#{tagLine}.")
             return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
@@ -143,19 +143,21 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
         for index, match in enumerate(match_list):
             match_info = tft_watcher.match.by_id(region, match)
             if mode == "GameMode":
-                if game_num > 1:
-                    game_num -= 1
-                elif match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
-                    match_id = match_list[index]  # Get the latest match ID
-                    match_found = True
-                    break
+                if match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
+                    if game_num > 1:
+                        game_num -= 1
+                    else:
+                        match_id = match_list[index]  # Get the latest match ID
+                        match_found = True
+                        break
             else:
-                if game_num > 1:
-                    game_num -= 1
-                elif match_info['info']['queue_id'] == dicts.game_type_to_id[mode]:
-                    match_id = match_list[index]  # Get the latest match ID
-                    match_found = True
-                    break
+                if match_info['info']['queue_id'] == dicts.game_type_to_id[mode]:
+                    if game_num > 1:
+                        game_num -= 1
+                    else:
+                        match_id = match_list[index]  # Get the latest match ID
+                        match_found = True
+                        break
         if not match_found:
             mode = mode.lower()
             print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
@@ -242,6 +244,56 @@ def last_match(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, re
     except Exception as err:
         print(f"Error fetching last match for {gameName}#{tagLine}: {err}")
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
+
+# Get recent x matches
+def recent_matches(gameName, tagLine, mode, mass_region, riot_token, tft_watcher, region, num_matches):
+
+    puuid = get_puuid(gameName, tagLine, mass_region, riot_token)
+    if not puuid:
+        print(f"Could not find PUUID for {gameName}#{tagLine}.")
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+
+    try:
+        # Fetch the latest x matches
+        match_list = tft_watcher.match.by_puuid(region, puuid, count=30) # 30 is arbitrary
+        placements = []
+        real_num_matches = 0
+        if not match_list:
+            print(f"No matches found for {gameName}#{tagLine}.")
+            return f"No matches found for {gameName}#{tagLine}.", None, None
+        if num_matches > 20 or num_matches < 0:
+            print(f"Please enter a number between 1 and 20.")
+            return f"Please enter a number between 1 and 20.", None, None
+
+        for index, match in enumerate(match_list):
+            match_info = tft_watcher.match.by_id(region, match)
+            if mode == "GameMode":
+                if match_info['info']['queue_id'] > dicts.game_type_to_id[mode] and num_matches > 0:
+                    num_matches -= 1
+                    real_num_matches += 1
+                    for participant in match_info['info']['participants']:
+                        player_puuid = participant['puuid']
+                        if player_puuid == puuid:
+                            placements.append(participant['placement'])
+                            break
+
+            else:
+                if match_info['info']['queue_id'] == dicts.game_type_to_id[mode] and num_matches > 0:
+                    num_matches -= 1
+                    real_num_matches += 1
+                    for participant in match_info['info']['participants']:
+                        player_puuid = participant['puuid']
+                        if player_puuid == puuid:
+                            placements.append(participant['placement'])
+                            break
+        if real_num_matches == 0:
+            print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
+            return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None
+        return None, placements, real_num_matches
+        
+    except Exception as err:
+        print(f"Error fetching recent matches for {gameName}#{tagLine}: {err}")
+        return f"Error fetching recent matches for {gameName}#{tagLine}: {err}", None, None
 
 # Custom equal to handle spaces in usernames
 def custom_equal(str1, str2, chars_to_ignore):
