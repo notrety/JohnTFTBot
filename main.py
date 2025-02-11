@@ -92,6 +92,8 @@ async def on_ready():
     try:
         # Load the commands cog after the bot is ready
         await bot.load_extension('commands')  # Make sure this is awaited
+        await bot.tree.sync()
+        print(f"Synced slash commands for {bot.user}")
     except Exception as e:
         print(f"Failed to load extension: {e}")
 

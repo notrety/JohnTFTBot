@@ -291,19 +291,11 @@ You can also add a number as the first argument to specify which match you are l
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
 
     # Command to link riot and discord accounts, stored in mongodb database
-    @commands.command()
-    async def link(self, ctx, *args):
-        input = " ".join(args)
-        parts = input.replace("#", " ").split()
-        if len(parts) < 2:
-            await ctx.send(f"Please enter your name and tagline")
-        user_id = str(ctx.author.id)
-        tag = parts[len(parts) - 1]
-        parts[len(parts) - 1] = ""
-        name = ""
-        for part in parts:
-            name += part + " "
-        name = name[:-2] #remove last space
+    @discord.app_commands.command(name="link", description="Link discord account to riot account")
+    async def link(self, interaction: discord.Interaction, name: str = discord.app_commands.Parameter(description="Your Riot account name"),
+                   tag: str = discord.app_commands.Parameter(description="Your Riot account tag (e.g., NA1)")):
+
+        user_id = str(interaction.user.id)
 
         # Check if the user already has linked data
         existing_user = self.collection.find_one({"discord_id": user_id})
@@ -314,7 +306,10 @@ You can also add a number as the first argument to specify which match you are l
                 {"discord_id": user_id},
                 {"$set": {"name": name, "tag": tag}}
             )
-            await ctx.send(f"Your data has been updated to: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of !link <name>#<tagline>.")
+            await interaction.response.send_message(
+                f"Your data has been updated to: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
+                ephemeral=True  # Sends the response privately to the user
+            )        
         else:
             # If no data exists, insert a new document for the user
             self.collection.insert_one({
@@ -322,7 +317,10 @@ You can also add a number as the first argument to specify which match you are l
                 "name": name,
                 "tag": tag
             })
-            await ctx.send(f"Your data has been linked: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of !link <name>#<tagline>.")
+            await interaction.response.send_message(
+                f"Your data has been linked: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
+                ephemeral=True
+            )
 
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command()
@@ -505,7 +503,7 @@ You can also add a number as the first argument to specify how many matches to i
 **!lb** - View overall bot leaderboard\n
 **!ping** - Test that bot is active\n
 **!commands** - Get a list of all commands\n
-**!link** - Link discord account to riot account\n
+**/link** - Link discord account to riot account\n
 **!cutoff** - Show the LP cutoffs for Challenger and GM\n
 **!roll** - Rolls a random number (default 1-100)\n
 **!h** - Display recent placements for a player
