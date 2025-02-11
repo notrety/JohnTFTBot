@@ -292,9 +292,19 @@ You can also add a number as the first argument to specify which match you are l
 
     # Command to link riot and discord accounts, stored in mongodb database
     @commands.command()
-    async def link(self, ctx, name: str, tag: str):
+    async def link(self, ctx, *args):
+        input = " ".join(args)
+        parts = input.replace("#", " ").split()
+        if len(parts) < 2:
+            await ctx.send(f"Please enter your name and tagline")
         user_id = str(ctx.author.id)
-        
+        tag = parts[len(parts) - 1]
+        parts[len(parts) - 1] = ""
+        name = ""
+        for part in parts:
+            name += part + " "
+        name = name[:-2] #remove last space
+
         # Check if the user already has linked data
         existing_user = self.collection.find_one({"discord_id": user_id})
         
@@ -304,7 +314,7 @@ You can also add a number as the first argument to specify which match you are l
                 {"discord_id": user_id},
                 {"$set": {"name": name, "tag": tag}}
             )
-            await ctx.send(f"Your data has been updated to: {name} {tag}")
+            await ctx.send(f"Your data has been updated to: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of !link <name>#<tagline>.")
         else:
             # If no data exists, insert a new document for the user
             self.collection.insert_one({
@@ -312,7 +322,7 @@ You can also add a number as the first argument to specify which match you are l
                 "name": name,
                 "tag": tag
             })
-            await ctx.send(f"Your data has been linked: {name} {tag}")
+            await ctx.send(f"Your data has been linked: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of !link <name>#<tagline>.")
 
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command()
