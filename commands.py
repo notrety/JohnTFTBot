@@ -47,7 +47,7 @@ class BotCommands(commands.Cog):
         elif len(args) == 0: # Check for linked account by sender
             data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
             if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
             # User formatted command incorrectly, let them know
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
@@ -104,11 +104,11 @@ class BotCommands(commands.Cog):
             match_index = int(args[0])
             data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
             if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
             data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
             if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
             # User formatted command incorrectly, let them know
             await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n
@@ -292,9 +292,7 @@ You can also add a number as the first argument to specify which match you are l
 
     # Command to link riot and discord accounts, stored in mongodb database
     @discord.app_commands.command(name="link", description="Link discord account to riot account")
-    async def link(self, interaction: discord.Interaction, name: str = discord.app_commands.Parameter(description="Your Riot account name"),
-                   tag: str = discord.app_commands.Parameter(description="Your Riot account tag (e.g., NA1)")):
-
+    async def link(self, interaction: discord.Interaction, name: str, tag: str):
         user_id = str(interaction.user.id)
 
         # Check if the user already has linked data
@@ -456,11 +454,11 @@ You can also add a number as the first argument to specify which match you are l
             num_matches = int(args[0])
             data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
             if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
             data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
             if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `!link <name> <tag>` to link your account.")
+                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
             # User formatted command incorrectly, let them know
             await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n

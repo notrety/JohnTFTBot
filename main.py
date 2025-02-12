@@ -97,5 +97,10 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to load extension: {e}")
 
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send("Sorry, that command does not exist. Please check the available commands using `!commands`.")
+
 # Run the bot with your token
 bot.run(bot_token)
