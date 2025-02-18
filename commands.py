@@ -474,8 +474,11 @@ You can also add a number as the first argument to specify how many matches to i
                 firsts = 0
                 total_placement = 0
                 text = ""
-                for placement in placements:
-                    text += str(placement) + " "
+                for idx, placement in enumerate(placements):
+                    if idx == 9 and real_num_matches == 20:
+                        text += dicts.number_to_num_icon[placement] + "\n"
+                    else:
+                        text += dicts.number_to_num_icon[placement] + " "
                     total_placement += placement
                     if int(placement) <= 4:
                         top4s += 1
