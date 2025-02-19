@@ -27,11 +27,13 @@ class BotCommands(commands.Cog):
     # Basic test command
     @commands.command()
     async def ping(self, ctx):
+        print("> Ping command used")
         await ctx.send('Lima Oscar Lima!')
 
     # Command to fetch TFT stats
     @commands.command(name="stats", aliases=["stast", "s", "tft"])
     async def stats(self, ctx, *args):
+        print("> Stats command used")
         data = False
         if len(args) == 2:  # Expecting name and tagline
             gameName = args[0]
@@ -63,6 +65,7 @@ class BotCommands(commands.Cog):
     # Command to fetch last match data
     @commands.command(name="r", aliases=["rs","recent","rr","rn","rh","rd","rg"])
     async def r(self, ctx, *args):
+        print("> Recent command used")
         if ctx.invoked_with == "rn":
             game_type = "Normal"
         elif ctx.invoked_with == "rg":
@@ -293,6 +296,7 @@ You can also add a number as the first argument to specify which match you are l
     # Command to link riot and discord accounts, stored in mongodb database
     @discord.app_commands.command(name="link", description="Link discord account to riot account")
     async def link(self, interaction: discord.Interaction, name: str, tag: str):
+        print("> Link command used")
         user_id = str(interaction.user.id)
 
         # Check if the user already has linked data
@@ -323,6 +327,7 @@ You can also add a number as the first argument to specify which match you are l
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command()
     async def lb(self, ctx):
+        print("> Lb command used")
         start_time = time.perf_counter()  # Start time
         _, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
         result = ""
@@ -385,6 +390,7 @@ You can also add a number as the first argument to specify which match you are l
     # Commnad to check the lp cutoff for challenger and grandmaster
     @commands.command(name="cutoff", aliases=["cutoffs, challenger, grandmaster, grandmasters, lpcutoff"])
     async def cutoff(self, ctx):
+        print("> Cutoff command used")
         challenger_cutoff, grandmaster_cutoff = helpers.get_cutoff(self.tft_watcher, self.region)
         cutoff_embed = discord.Embed(
             title=f"Cutoff LPs",
@@ -396,6 +402,7 @@ You can also add a number as the first argument to specify which match you are l
     # Roll command 
     @commands.command()
     async def roll(self, ctx, *args):
+        print("> Roll command used")
         user = ctx.author.id
         roll_result = random.randint(1,100)
         if(args):
@@ -413,6 +420,7 @@ You can also add a number as the first argument to specify which match you are l
     # History command 
     @commands.command(name="h", aliases=["history","hr","hn","hh","hd","hg"])
     async def history(self, ctx, *args):
+        print("> History command used")
         if ctx.invoked_with == "hn":
             game_type = "Normal"
         elif ctx.invoked_with == "hg":
@@ -494,8 +502,9 @@ You can also add a number as the first argument to specify how many matches to i
                 await ctx.send(embed=embed)  # Send embed
 
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
-    @commands.command()
+    @commands.command(name="commands", aliases=["c"])
     async def commands(self, ctx): 
+        print("> Commands command used")
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""

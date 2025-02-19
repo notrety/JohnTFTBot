@@ -33,7 +33,6 @@ def get_cutoff(tft_watcher, region):
 def get_trait_icon(traits_data, traitName):
     for trait in traits_data:
         if trait.get("apiName") == traitName:
-            print("Trait Found")
             return trait.get("icon", "")[:-4] # Removes the beginning of the datadragon icon_path 
     print("Trait not Found")
     return None  # Return None if the trait_id is not found
@@ -44,7 +43,6 @@ def get_champ_icon(champs_data, characterName):
     for champion in champs_data:        
         # Check if the apiName matches the provided characterName
         if champion.get("apiName").lower() == characterName.lower():
-            print("Champion Found")
             # Assuming 'champion' dictionary contains a 'squareIcon' key with the icon path
             return champion.get("tileIcon", "")[:-4]  # Remove the last 4 characters (usually file extension)
     
@@ -55,7 +53,6 @@ def get_champ_icon(champs_data, characterName):
 def get_item_icon(items_data, itemName):
     for item in items_data:
             if item.get("nameId") == itemName:
-                print("Item Found")
                 return item.get("squareIconPath", "")[21:]
     print(f"{itemName} Not Found")
     return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
@@ -348,7 +345,6 @@ def trait_image(trait_name: str, style: int, trait_icon_mapping):
         # Download the trait icon
         icon_path = get_trait_icon(trait_icon_mapping, trait_name).lower()
         icon_url = f"https://raw.communitydragon.org/latest/game/{icon_path}.png"
-        print(f"Fetching icon from: {icon_url}")
 
         icon_response = requests.get(icon_url)
         if icon_response.status_code != 200:
