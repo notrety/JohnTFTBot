@@ -114,7 +114,8 @@ def calculate_elo(puuid, tft_watcher, region):
                 raise e  # Re-raise other errors
 
 # Function to get rank info from puuid and return embed with rank icon
-def get_rank_embed(gameName, tagLine, mass_region, riot_watcher, tft_watcher, region):
+def get_rank_embed(name, tagLine, mass_region, riot_watcher, tft_watcher, region):
+    gameName = name.replace("_", " ")
     puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
     if not puuid:
         return None, f"Could not find PUUID for {gameName}#{tagLine}."

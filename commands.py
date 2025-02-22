@@ -534,10 +534,12 @@ You can also add a number as the first argument to specify how many matches to i
             if text == "":
                 db_games = db_user_data['games']
                 db_elo = int(db_user_data['elo'])
+                rank_icon_url = ""
                 for entry in rank_info:
                     if entry['queueType'] == 'RANKED_TFT':
                         elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
                         total_games = entry['wins'] + entry['losses']
+                        rank_icon_url = "https://raw.githubusercontent.com/InFinity54/LoL_DDragon/refs/heads/master/extras/tier/" + entry['tier'].lower() + ".png"
                 if total_games == db_games:
                     text = f"No games played today by {gameName}#{tagLine}."
                     embed = discord.Embed(
@@ -549,10 +551,13 @@ You can also add a number as the first argument to specify how many matches to i
                     return
                 elo_diff = elo - db_elo
                 lp_diff = ""
+                lp_diff_emoji = ""
                 if elo_diff >= 0:
                     lp_diff = "+" + str(elo_diff)
+                    lp_diff_emoji = "📈"
                 else:
                     lp_diff = str(elo_diff)
+                    lp_diff_emoji = "📉"
                 today_games = total_games - db_games
                 match_list = self.tft_watcher.match.by_puuid(self.region, puuid, count=20)
                 placements = []
@@ -570,21 +575,20 @@ You can also add a number as the first argument to specify how many matches to i
                                 placements.append(participant['placement'])
                                 break
                 total_placement = 0
-                top4s = 0
-                firsts = 0
+                scores = ""
                 for placement in placements:
+                    scores += dicts.number_to_num_icon[placement] + " "
                     total_placement += placement
-                    if int(placement) <= 4:
-                        top4s += 1
-                        if int(placement) == 1:
-                            firsts += 1
                 avg_placement = round(total_placement / len(placements), 1)
-                text = f"**Games Played:** {today_games}\n**Firsts:** {firsts}\n**Top 4s:** {top4s}\n**Average Placement:** {avg_placement}\n**LP Differential:** {lp_diff}"
+                text = f"📊 **Games Played:** {today_games}\n⭐ **AVP:** {avg_placement}\n{lp_diff_emoji} **LP Difference:** {lp_diff}\n🏅 **Scores: **"
+                final_text = text + scores
             embed = discord.Embed(
-                        title=f"Summary of Today's Games for {gameName}#{tagLine}",
-                        description=text,
+                        title=f"Today: {gameName}#{tagLine}",
+                        description=final_text,
                         color=discord.Color.blue()
                     )
+            embed.set_thumbnail(url=rank_icon_url)
+            embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
             await ctx.send(embed=embed)
 
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
