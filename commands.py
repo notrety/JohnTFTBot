@@ -543,7 +543,7 @@ You can also add a number as the first argument to specify how many matches to i
                 if total_games == db_games:
                     text = f"No games played today by {gameName}#{tagLine}."
                     embed = discord.Embed(
-                        title=f"Summary of Today's Games for {gameName}#{tagLine}",
+                        title=f"Today: {gameName}#{tagLine}",
                         description=text,
                         color=discord.Color.blue()
                     )
