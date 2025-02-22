@@ -27,13 +27,11 @@ class BotCommands(commands.Cog):
     # Basic test command
     @commands.command()
     async def ping(self, ctx):
-        print("> Ping command used")
         await ctx.send('Lima Oscar Lima!')
 
     # Command to fetch TFT stats
     @commands.command(name="stats", aliases=["stast", "s", "tft"])
     async def stats(self, ctx, *args):
-        print("> Stats command used")
         data = False
         if len(args) == 2:  # Expecting name and tagline
             gameName = args[0]
@@ -63,9 +61,8 @@ class BotCommands(commands.Cog):
                 await ctx.send(embed=rank_embed)  # Send embed
 
     # Command to fetch last match data
-    @commands.command(name="r", aliases=["rs","recent","rr","rn","rh","rd","rg"])
-    async def r(self, ctx, *args):
-        print("> Recent command used")
+    @commands.command(name="recent", aliases=["rs","r","rr","rn","rh","rd","rg"])
+    async def recent(self, ctx, *args):
         if ctx.invoked_with == "rn":
             game_type = "Normal"
         elif ctx.invoked_with == "rg":
@@ -296,7 +293,6 @@ You can also add a number as the first argument to specify which match you are l
     # Command to link riot and discord accounts, stored in mongodb database
     @discord.app_commands.command(name="link", description="Link discord account to riot account")
     async def link(self, interaction: discord.Interaction, name: str, tag: str):
-        print("> Link command used")
         user_id = str(interaction.user.id)
 
         # Check if the user already has linked data
@@ -306,7 +302,7 @@ You can also add a number as the first argument to specify which match you are l
             # If user already has data, update it
             self.collection.update_one(
                 {"discord_id": user_id},
-                {"$set": {"name": name, "tag": tag}}
+                {"$set": {"name": name.lower(), "tag": tag.lower()}}
             )
             await interaction.response.send_message(
                 f"Your data has been updated to: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
@@ -316,8 +312,8 @@ You can also add a number as the first argument to specify which match you are l
             # If no data exists, insert a new document for the user
             self.collection.insert_one({
                 "discord_id": user_id,
-                "name": name,
-                "tag": tag
+                "name": name.lower(),
+                "tag": tag.lower()
             })
             await interaction.response.send_message(
                 f"Your data has been linked: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
@@ -327,7 +323,6 @@ You can also add a number as the first argument to specify which match you are l
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command()
     async def lb(self, ctx):
-        print("> Lb command used")
         start_time = time.perf_counter()  # Start time
         _, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
         result = ""
@@ -388,9 +383,8 @@ You can also add a number as the first argument to specify which match you are l
         await ctx.send(embed=lb_embed)
 
     # Commnad to check the lp cutoff for challenger and grandmaster
-    @commands.command(name="cutoff", aliases=["cutoffs, challenger, grandmaster, grandmasters, lpcutoff"])
+    @commands.command(name="cutoff", aliases=["cutoffs, challenger, grandmaster, grandmasters, lpcutoff, chall, gm"])
     async def cutoff(self, ctx):
-        print("> Cutoff command used")
         challenger_cutoff, grandmaster_cutoff = helpers.get_cutoff(self.tft_watcher, self.region)
         cutoff_embed = discord.Embed(
             title=f"Cutoff LPs",
@@ -402,7 +396,6 @@ You can also add a number as the first argument to specify which match you are l
     # Roll command 
     @commands.command()
     async def roll(self, ctx, *args):
-        print("> Roll command used")
         user = ctx.author.id
         roll_result = random.randint(1,100)
         if(args):
@@ -418,9 +411,8 @@ You can also add a number as the first argument to specify which match you are l
         await ctx.send(embed=roll_embed)
 
     # History command 
-    @commands.command(name="h", aliases=["history","hr","hn","hh","hd","hg"])
+    @commands.command(name="history", aliases=["h","hr","hn","hh","hd","hg"])
     async def history(self, ctx, *args):
-        print("> History command used")
         if ctx.invoked_with == "hn":
             game_type = "Normal"
         elif ctx.invoked_with == "hg":
@@ -501,22 +493,116 @@ You can also add a number as the first argument to specify how many matches to i
                 )
                 await ctx.send(embed=embed)  # Send embed
 
+    # Command that summarizes todays games, only works for linked accounts
+    @commands.command(name="today", aliases=["t"])
+    async def today(self, ctx, *args): 
+        # Account must be linked for this command
+        data = False
+        if len(args) == 2:  # Expecting name and tagline
+            gameName = args[0].replace("_", " ")
+            tagLine = args[1]
+            data = helpers.check_data_name_tag(gameName, tagLine, self.collection) # Check if name and tag are in database
+            if not data:
+                await ctx.send(f"{gameName}#{tagLine} has not linked their name and tagline.")
+        elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
+            mentioned_user = args[0]
+            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+            # Check if user is linked
+            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            if not data:
+                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
+        elif len(args) == 0: # Check for linked account by sender
+            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            if not data:
+                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
+        else: 
+            # User formatted command incorrectly, let them know
+            await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
+
+        if data:
+            text = ""
+            puuid = helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_watcher)
+            if not puuid:
+                text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
+            summoner = self.tft_watcher.summoner.by_puuid(self.region, puuid)
+            rank_info = self.tft_watcher.league.by_summoner(self.region, summoner['id'])
+            db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
+            if not db_user_data:
+                text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
+            if "games" not in db_user_data:
+                text = f"ERROR: If you linked your account in the past day, this command will not work as we need to store the data from the previous day."
+            if text == "":
+                db_games = db_user_data['games']
+                db_elo = int(db_user_data['elo'])
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_TFT':
+                        elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+                        total_games = entry['wins'] + entry['losses']
+                if total_games == db_games:
+                    text = f"No games played today by {gameName}#{tagLine}."
+                    embed = discord.Embed(
+                        title=f"Summary of Today's Games for {gameName}#{tagLine}",
+                        description=text,
+                        color=discord.Color.blue()
+                    )
+                    await ctx.send(embed=embed)
+                    return
+                elo_diff = elo - db_elo
+                lp_diff = ""
+                if elo_diff >= 0:
+                    lp_diff = "+" + str(elo_diff)
+                else:
+                    lp_diff = str(elo_diff)
+                today_games = total_games - db_games
+                match_list = self.tft_watcher.match.by_puuid(self.region, puuid, count=20)
+                placements = []
+                num_matches = today_games
+                if not match_list:
+                    text = f"No matches found for {gameName}#{tagLine}."
+
+                for match in match_list:
+                    match_info = self.tft_watcher.match.by_id(self.region, match)
+                    if match_info['info']['queue_id'] == dicts.game_type_to_id["Ranked"] and num_matches > 0:
+                        num_matches -= 1
+                        for participant in match_info['info']['participants']:
+                            player_puuid = participant['puuid']
+                            if player_puuid == puuid:
+                                placements.append(participant['placement'])
+                                break
+                total_placement = 0
+                top4s = 0
+                firsts = 0
+                for placement in placements:
+                    total_placement += placement
+                    if int(placement) <= 4:
+                        top4s += 1
+                        if int(placement) == 1:
+                            firsts += 1
+                avg_placement = round(total_placement / len(placements), 1)
+                text = f"**Games Played:** {today_games}\n**Firsts:** {firsts}\n**Top 4s:** {top4s}\n**Average Placement:** {avg_placement}\n**LP Differential:** {lp_diff}"
+            embed = discord.Embed(
+                        title=f"Summary of Today's Games for {gameName}#{tagLine}",
+                        description=text,
+                        color=discord.Color.blue()
+                    )
+            await ctx.send(embed=embed)
+
     # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
     @commands.command(name="commands", aliases=["c"])
     async def commands(self, ctx): 
-        print("> Commands command used")
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""
 **!r** - View most recent match\n
-**!stats** - Check ranked stats for a player\n
+**!s** - Check ranked stats for a player\n
 **!lb** - View overall bot leaderboard\n
 **!ping** - Test that bot is active\n
 **!commands** - Get a list of all commands\n
 **/link** - Link discord account to riot account\n
 **!cutoff** - Show the LP cutoffs for Challenger and GM\n
 **!roll** - Rolls a random number (default 1-100)\n
-**!h** - Display recent placements for a player
+**!h** - Display recent placements for a player\n
+**!t** - Gives summary of today's games
         """,
         color=discord.Color.blue()
         )

@@ -1,6 +1,10 @@
 import discord
 import requests
 import os
+import pytz
+import datetime
+import asyncio
+import helpers
 from discord.ext import commands
 from riotwatcher import RiotWatcher, TftWatcher
 from dotenv import load_dotenv
@@ -84,10 +88,29 @@ bot.item_mapping = item_mapping
 bot.riot_token = riot_token
 bot.trait_icon_mapping = trait_icon_mapping
 
-# Show bot is online
+# Take a snapshot of games and LP for !today command
+async def scheduler():
+    """Runs the scheduled task at 5 AM EST every day."""
+    await bot.wait_until_ready()  # Ensure bot is fully loaded before running the task
+    eastern = pytz.timezone("America/New_York")
+
+    while not bot.is_closed():
+        now = datetime.datetime.now(eastern)
+        target_time = now.replace(hour=5, minute=0, second=0, microsecond=0)
+
+        if now > target_time:
+            target_time += datetime.timedelta(days=1)  # Schedule for next day if already past 6 AM
+
+        wait_time = (target_time - now).total_seconds()
+
+        await asyncio.sleep(wait_time)  # Wait until 5 AM EST
+        await helpers.store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, region)  # Run the task
+
+# Show bot is online and invoke scheduled snapshot functionality
 @bot.event
 async def on_ready():
     print(f'Bot is online as {bot.user}')
+    bot.loop.create_task(scheduler())  # Start the scheduler in the background
 
     try:
         # Load the commands cog after the bot is ready
@@ -101,6 +124,11 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         await ctx.send("Sorry, that command does not exist. Please check the available commands using `!commands`.")
+
+@bot.event
+async def on_command(ctx):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Command used: {ctx.command} at {timestamp}")
 
 # Run the bot with your token
 bot.run(bot_token)

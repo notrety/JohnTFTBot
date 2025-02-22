@@ -8,6 +8,26 @@ from datetime import datetime
 from PIL import Image
 from io import BytesIO
 
+def store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, region):
+    all_users = collection.find()
+    for user in all_users:
+        name = user['name']
+        tag = user['tag']
+        puuid = get_puuid(name, tag, mass_region, riot_watcher)
+        if not puuid:
+            print(f"Error updating elo and games, couldn't get PUUID for {name}#{tag}")
+        summoner = tft_watcher.summoner.by_puuid(region, puuid)
+        rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+        for entry in rank_info:
+            if entry['queueType'] == 'RANKED_TFT':
+                total_games = entry['wins'] + entry['losses']
+                elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+
+        collection.update_one(
+                {"name": user["name"], "tag": user["tag"]},
+                {"$set": {"games": total_games, "elo": elo}}
+            )
+    print("Games and elos stored.")
 # Function to return cutoff lp for challenger and grandmaster
 def get_cutoff(tft_watcher, region):
 
@@ -276,7 +296,7 @@ def recent_matches(gameName, tagLine, mode, mass_region, riot_watcher, tft_watch
             print(f"Please enter a number between 1 and 20.")
             return f"Please enter a number between 1 and 20.", None, None
 
-        for index, match in enumerate(match_list):
+        for match in match_list:
             match_info = tft_watcher.match.by_id(region, match)
             if mode == "GameMode":
                 if match_info['info']['queue_id'] > dicts.game_type_to_id[mode] and num_matches > 0:
@@ -312,7 +332,7 @@ def custom_equal(str1, str2, chars_to_ignore):
     str2 = str2.lower().translate(str.maketrans('', '', chars_to_ignore))
     return str1 == str2
 
-# Function to check if user is linked 
+# Function to check if user is linked based on discord id
 def check_data(id, collection):
     user_id = str(id)
         
@@ -328,6 +348,16 @@ def check_data(id, collection):
     else:
         # If user isn't linked, inform the user
         return False, None, None
+    
+# Function to check if user is linked based on name and tag
+def check_data_name_tag(name, tag, collection):
+    name_with_spaces = name.replace("_", " ")
+    query = {"name": name_with_spaces, "tag": tag} 
+    user_data = collection.find_one(query) # Query the database
+
+    if user_data:
+        return True
+    return False
 
 # Command to get trait icon with texture 
 def trait_image(trait_name: str, style: int, trait_icon_mapping):
