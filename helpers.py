@@ -83,7 +83,7 @@ def get_puuid(gameName, tagLine, mass_region, riot_watcher):
         info = riot_watcher.account.by_riot_id(mass_region, gameName, tagLine)
         return info['puuid']
     except Exception as err:
-        print("Failed to retrieve PUUID for {gameName}#{tagLine}.")
+        print(f"Failed to retrieve PUUID for {gameName}#{tagLine}.")
         return None
 
 # Function to calculate ranked elo based on given PUUID
