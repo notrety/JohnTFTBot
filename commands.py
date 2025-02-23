@@ -12,7 +12,7 @@ from io import BytesIO
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
-    def __init__(self, bot, tft_watcher, riot_watcher, collection, region, mass_region, champ_mapping, item_mapping, riot_token, trait_icon_mapping):
+    def __init__(self, bot, tft_watcher, riot_watcher, collection, region, mass_region, champ_mapping, item_mapping, riot_token, trait_icon_mapping, companion_mapping):
         self.bot = bot
         self.tft_watcher = tft_watcher
         self.riot_watcher = riot_watcher
@@ -23,6 +23,7 @@ class BotCommands(commands.Cog):
         self.item_mapping = item_mapping
         self.riot_token = riot_token
         self.trait_icon_mapping = trait_icon_mapping
+        self.companion_mapping = companion_mapping
 
     # Basic test command
     @commands.command()
@@ -587,7 +588,10 @@ You can also add a number as the first argument to specify how many matches to i
                         description=final_text,
                         color=discord.Color.blue()
                     )
-            embed.set_thumbnail(url=rank_icon_url)
+            companion_content_ID = helpers.get_last_game_companion(gameName, tagLine, self.mass_region, self.riot_watcher, self.tft_watcher, self.region)
+            companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
+            companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
+            embed.set_thumbnail(url=companion_url)
             embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
             await ctx.send(embed=embed)
 
@@ -615,4 +619,4 @@ You can also add a number as the first argument to specify how many matches to i
 # Add this class as a cog to main
 async def setup(bot):
     await bot.add_cog(BotCommands(bot, bot.tft_watcher, bot.riot_watcher, bot.collection, bot.region, 
-                                  bot.mass_region, bot.champ_mapping, bot.item_mapping, bot.riot_token, bot.trait_icon_mapping))
+                                  bot.mass_region, bot.champ_mapping, bot.item_mapping, bot.riot_token, bot.trait_icon_mapping, bot.companion_mapping))

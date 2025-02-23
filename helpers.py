@@ -77,6 +77,13 @@ def get_item_icon(items_data, itemName):
     print(f"{itemName} Not Found")
     return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
 
+def get_companion_icon(companions_json, contentId):
+    for companion in companions_json:
+        if contentId == companion.get("contentId"):
+            return companion.get("loadoutsIcon")[21:]
+    print(f"{contentId} Not Found")
+    return None
+
 # Function to fetch PUUID
 def get_puuid(gameName, tagLine, mass_region, riot_watcher):
     try:
@@ -85,6 +92,23 @@ def get_puuid(gameName, tagLine, mass_region, riot_watcher):
     except Exception as err:
         print(f"Failed to retrieve PUUID for {gameName}#{tagLine}.")
         return None
+
+def get_last_game_companion(name, tagLine, mass_region, riot_watcher, tft_watcher, region):
+    gameName = name.replace("_", " ")
+    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
+    if not puuid:
+        return None, f"Could not find PUUID for {gameName}#{tagLine}."
+
+    try:
+        match = tft_watcher.match.by_puuid(region, puuid, count=1) # Grabbing last match 
+        match_info = tft_watcher.match.by_id(region, match[0])
+        for participant in match_info['info']['participants']:
+            if participant['puuid'] == puuid:
+                return participant['companion']['content_ID']
+            
+    except Exception as err:
+        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+
 
 # Function to calculate ranked elo based on given PUUID
 def calculate_elo(puuid, tft_watcher, region):

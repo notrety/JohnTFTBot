@@ -34,6 +34,7 @@ riot_token = os.getenv("RIOT_API_TOKEN")
 # Setting json urls
 json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
 item_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/tftitems.json"
+companion_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/companions.json"
 
 # Setting champion and trait mapping
 response = requests.get(json_url)
@@ -61,6 +62,15 @@ if response.status_code == 200:
 else:
     print("Failed to fetch data")
 
+response = requests.get(companion_json_url)
+if response.status_code == 200:
+    companion_mapping = response.json()  # Assuming data is a dictionary
+    print("Companions parsed successfully")
+else:
+    print("Failed to fetch data")
+
+
+
 # Enable all necessary intents
 intents = discord.Intents.default()
 intents.message_content = True  # Enable message content intent
@@ -87,6 +97,7 @@ bot.champ_mapping = champ_mapping
 bot.item_mapping = item_mapping
 bot.riot_token = riot_token
 bot.trait_icon_mapping = trait_icon_mapping
+bot.companion_mapping = companion_mapping
 
 # Take a snapshot of games and LP for !today command
 async def scheduler():
