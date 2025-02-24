@@ -535,12 +535,13 @@ You can also add a number as the first argument to specify how many matches to i
             if text == "":
                 db_games = db_user_data['games']
                 db_elo = int(db_user_data['elo'])
-                rank_icon_url = ""
                 for entry in rank_info:
                     if entry['queueType'] == 'RANKED_TFT':
-                        elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+                        tier = entry['tier']
+                        rank = entry['rank']
+                        lp = entry['leaguePoints']
+                        elo = dicts.rank_to_elo[tier + " " + rank] + int(lp)
                         total_games = entry['wins'] + entry['losses']
-                        rank_icon_url = "https://raw.githubusercontent.com/InFinity54/LoL_DDragon/refs/heads/master/extras/tier/" + entry['tier'].lower() + ".png"
                 if total_games == db_games:
                     text = f"No games played today by {gameName}#{tagLine}."
                     embed = discord.Embed(
@@ -581,7 +582,8 @@ You can also add a number as the first argument to specify how many matches to i
                     scores += dicts.number_to_num_icon[placement] + " "
                     total_placement += placement
                 avg_placement = round(total_placement / len(placements), 1)
-                text = f"📊 **Games Played:** {today_games}\n⭐ **AVP:** {avg_placement}\n{lp_diff_emoji} **LP Difference:** {lp_diff}\n🏅 **Scores: **"
+                rank_icon = dicts.tier_to_rank_icon[tier]
+                text = f"{rank_icon} **Rank: **{tier} {rank} ({lp} LP)\n📊 **Games Played:** {today_games}\n⭐ **AVP:** {avg_placement}\n{lp_diff_emoji} **LP Difference:** {lp_diff}\n🏅 **Scores: **"
                 final_text = text + scores
             embed = discord.Embed(
                         title=f"Today: {gameName}#{tagLine}",
