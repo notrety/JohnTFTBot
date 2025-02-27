@@ -121,7 +121,7 @@ async def scheduler():
 @bot.event
 async def on_ready():
     print(f'Bot is online as {bot.user}')
-    bot.loop.create_task(scheduler())  # Start the scheduler in the background
+    #bot.loop.create_task(scheduler())  # Start the scheduler in the background
 
     try:
         # Load the commands cog after the bot is ready
@@ -140,6 +140,9 @@ async def on_command_error(ctx, error):
 async def on_command(ctx):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Command used: {ctx.command} at {timestamp}")
+
+# Only uncomment to manually run snapshot function
+#helpers.store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, region)
 
 # Run the bot with your token
 bot.run(bot_token)
