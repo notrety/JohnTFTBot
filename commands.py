@@ -5,6 +5,10 @@ import dicts
 import asyncio
 import random
 import time
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+
+from collections import Counter
 from discord.ui import View
 from discord.ext import commands
 from PIL import Image
@@ -487,12 +491,34 @@ You can also add a number as the first argument to specify how many matches to i
                             firsts += 1
                 avg_placement = round(total_placement / len(placements), 1)
                 text += f"\nFirsts: {firsts}\nTop 4s: {top4s}\nAverage Placement: {avg_placement}"
+
+                x_labels = list(range(1, 9))
+                counts = Counter(placements)
+                frequencies = [counts.get(num, 0) for num in x_labels]
+                
+                max_frequency = max(frequencies)
+                num_ticks = max(5, max_frequency)  # Minimum 5 ticks
+                y_labels = list(range(1, num_ticks+1))
+                # Create the plot
+                fig, ax = plt.subplots()
+                ax.bar(x_labels, frequencies, color='skyblue')
+                ax.set_xlabel('Placement')
+                ax.set_ylabel('Count')
+                ax.set_title('Placement Frequency')
+                ax.set_xticks(x_labels)  # X-axis 1-8
+                ax.set_yticks(y_labels)
+                filename = 'placements.png'
+                plt.savefig(filename)
+                plt.close()
                 embed = discord.Embed(
                     title=f"Recent {real_num_matches} {game_type} Matches for {gameName}#{tagLine}",
                     description=text,
                     color=discord.Color.blue()
                 )
-                await ctx.send(embed=embed)  # Send embed
+                file = discord.File('placements.png', filename='placements.png')
+                embed.set_image(url="attachment://placements.png")
+                
+                await ctx.send(file=file, embed=embed)
 
     # Command that summarizes todays games, only works for linked accounts
     @commands.command(name="today", aliases=["t"])
