@@ -335,23 +335,24 @@ You can also add a number as the first argument to specify which match you are l
         all_users = self.collection.find()
         # Create a list to store all users' elo and name
         user_elo_and_name = []
-        async def add_user(user):
+        def add_user(user):
             name = user['name']
             tag = user['tag']
 
-            puuid = await asyncio.to_thread(helpers.get_puuid, name, tag, self.mass_region, self.riot_watcher)
+            puuid = helpers.get_puuid(name, tag, self.mass_region, self.riot_watcher)
             
             if not puuid:
-                await ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
+                ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
             
-            user_elo = await asyncio.to_thread(helpers.calculate_elo, puuid, self.tft_watcher, self.region)
+            user_elo = helpers.calculate_elo(puuid, self.tft_watcher, self.region)
             name_and_tag = name + "#" + tag
             
             # Append each user's data (elo, name_and_tag) to the list
             user_elo_and_name.append((user_elo, name_and_tag, puuid))
 
-        await asyncio.gather(*[add_user(user) for user in all_users])
-
+        for user in all_users:
+            add_user(user)
+        
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
         
