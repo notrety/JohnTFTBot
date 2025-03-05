@@ -6,7 +6,6 @@ import datetime
 import asyncio
 import helpers
 from discord.ext import commands
-from riotwatcher import RiotWatcher, TftWatcher
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
 
@@ -30,6 +29,7 @@ load_dotenv()
 # Get the token
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 riot_token = os.getenv("RIOT_API_TOKEN")
+
 
 # Setting json urls
 json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
@@ -69,8 +69,6 @@ if response.status_code == 200:
 else:
     print("Failed to fetch data")
 
-
-
 # Enable all necessary intents
 intents = discord.Intents.default()
 intents.message_content = True  # Enable message content intent
@@ -79,23 +77,16 @@ intents.presences = True        # Enable presence intent
 
 # Create bot instance
 bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True)
-
 # Define regions
 mass_region = "americas"
-region = "na1"
+region = "na1"        
 
-# Initialize Riot API Wrapper
-tft_watcher = TftWatcher(riot_token)
-riot_watcher = RiotWatcher(riot_token)
-
-bot.tft_watcher = tft_watcher
-bot.riot_watcher = riot_watcher
 bot.collection = collection
+bot.riot_token = riot_token
 bot.region = region
 bot.mass_region = mass_region
 bot.champ_mapping = champ_mapping
 bot.item_mapping = item_mapping
-bot.riot_token = riot_token
 bot.trait_icon_mapping = trait_icon_mapping
 bot.companion_mapping = companion_mapping
 
@@ -115,14 +106,13 @@ async def scheduler():
         wait_time = (target_time - now).total_seconds()
 
         await asyncio.sleep(wait_time)  # Wait until 5 AM EST
-        await helpers.store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, region)  # Run the task
+        await helpers.store_elo_and_games(collection, mass_region, riot_token, region)  # Run the task
 
 # Show bot is online and invoke scheduled snapshot functionality
 @bot.event
 async def on_ready():
     print(f'Bot is online as {bot.user}')
     #bot.loop.create_task(scheduler())  # Start the scheduler in the background
-
     try:
         # Load the commands cog after the bot is ready
         await bot.load_extension('commands')  # Make sure this is awaited

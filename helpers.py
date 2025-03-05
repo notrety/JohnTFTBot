@@ -7,17 +7,17 @@ import time
 from datetime import datetime
 from PIL import Image
 from io import BytesIO
+from pulsefire.clients import RiotAPIClient
 
-def store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, region):
+async def store_elo_and_games(collection, mass_region, riot_token, region):
     all_users = collection.find()
     for user in all_users:
         name = user['name']
         tag = user['tag']
-        puuid = get_puuid(name, tag, mass_region, riot_watcher)
+        puuid = await get_puuid(name, tag, mass_region, riot_token)
         if not puuid:
             print(f"Error updating elo and games, couldn't get PUUID for {name}#{tag}")
-        summoner = tft_watcher.summoner.by_puuid(region, puuid)
-        rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+        rank_info = await get_rank_info(region, puuid, riot_token)
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 total_games = entry['wins'] + entry['losses']
@@ -29,17 +29,24 @@ def store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, regi
             )
     print("Games and elos stored.")
 # Function to return cutoff lp for challenger and grandmaster
-def get_cutoff(tft_watcher, region):
 
+async def get_rank_info(region, puuid, riot_token):
+    async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+        summoner = await client.get_lol_summoner_v4_by_puuid(region=region, puuid=puuid)
+        rank_info = await client.get_tft_league_v1_entries_by_summoner(region=region, summoner_id=summoner["id"])
+    return rank_info
+
+async def get_cutoff(riot_token, region):
     # grab all players who are challenger, grandmaster, and master
-    challengers = tft_watcher.league.challenger(region)['entries']
-    grandmasters = tft_watcher.league.grandmaster(region)['entries']
-    masters = tft_watcher.league.master(region)['entries']
-    
+    async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+        challengers = await client.get_tft_league_v1_challenger_league(region=region)
+        grandmasters = await client.get_tft_league_v1_grandmaster_league(region=region)
+        masters = await client.get_tft_league_v1_master_league(region=region)
+
     # put all the lps into a list
-    lps = [entry.get('leaguePoints') for entry in challengers]
-    lps.extend(entry.get('leaguePoints') for entry in grandmasters)
-    lps.extend(entry.get('leaguePoints') for entry in masters)
+    lps = [entry.get('leaguePoints') for entry in challengers['entries']]
+    lps.extend(entry.get('leaguePoints') for entry in grandmasters['entries'])
+    lps.extend(entry.get('leaguePoints') for entry in masters['entries'])
 
     # sort lps 
     lps_sorted = sorted(lps, reverse=True)
@@ -85,23 +92,26 @@ def get_companion_icon(companions_json, contentId):
     return None
 
 # Function to fetch PUUID
-def get_puuid(gameName, tagLine, mass_region, riot_watcher):
+async def get_puuid(gameName, tagLine, mass_region, riot_token):
     try:
-        info = riot_watcher.account.by_riot_id(mass_region, gameName, tagLine)
-        return info['puuid']
+        async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            account = await client.get_account_v1_by_riot_id(region=mass_region, game_name=gameName, tag_line=tagLine)
+        return account['puuid']
+
     except Exception as err:
-        print(f"Failed to retrieve PUUID for {gameName}#{tagLine}.")
+        print(f"Failed to retrieve PUUID for {gameName}#{tagLine}.{err}")
         return None
 
-def get_last_game_companion(name, tagLine, mass_region, riot_watcher, tft_watcher, region):
+async def get_last_game_companion(name, tagLine, mass_region, riot_token):
     gameName = name.replace("_", " ")
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
+    puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
         return None, f"Could not find PUUID for {gameName}#{tagLine}."
 
     try:
-        match = tft_watcher.match.by_puuid(region, puuid, count=1) # Grabbing last match 
-        match_info = tft_watcher.match.by_id(region, match[0])
+        async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            match = await client.get_tft_match_v1_match_ids_by_puuid(region = mass_region, puuid=puuid, queries= {"start": 0, "count": 1}) # Grabbing last match 
+            match_info = await client.get_tft_match_v1_match(region =mass_region, id = match[0])
         for participant in match_info['info']['participants']:
             if participant['puuid'] == puuid:
                 return participant['companion']['content_ID']
@@ -109,21 +119,19 @@ def get_last_game_companion(name, tagLine, mass_region, riot_watcher, tft_watche
     except Exception as err:
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
-
 # Function to calculate ranked elo based on given PUUID
-def calculate_elo(puuid, tft_watcher, region):
+async def calculate_elo(puuid, riot_token, region):
     attempts = 0
 
     while True:
         try:
             # Fetch summoner data
-            summoner = tft_watcher.summoner.by_puuid(region, puuid)
-            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+            rank_info = await get_rank_info(region, puuid, riot_token)
 
             # Find Ranked TFT entry
             for entry in rank_info:
                 if entry['queueType'] == 'RANKED_TFT':
-                    return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+                    return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
 
             return 0  # If no ranked TFT entry is found
 
@@ -138,15 +146,14 @@ def calculate_elo(puuid, tft_watcher, region):
                 raise e  # Re-raise other errors
 
 # Function to get rank info from puuid and return embed with rank icon
-def get_rank_embed(name, tagLine, mass_region, riot_watcher, tft_watcher, region):
+async def get_rank_embed(name, tagLine, mass_region, region, riot_token):
     gameName = name.replace("_", " ")
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
+    puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
         return None, f"Could not find PUUID for {gameName}#{tagLine}."
 
     try:
-        summoner = tft_watcher.summoner.by_puuid(region, puuid)
-        rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+        rank_info = await get_rank_info(region, puuid, riot_token)
 
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
@@ -176,16 +183,18 @@ def get_rank_embed(name, tagLine, mass_region, riot_watcher, tft_watcher, region
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
 # Function to grab previous match data
-def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, region, game_num):
+async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, game_num):
 
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
+    puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
 
     try:
         # Fetch the latest 20 matches
-        match_list = tft_watcher.match.by_puuid(region, puuid, count=30)
+        async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+
         if not match_list:
             print(f"No matches found for {gameName}#{tagLine}.")
             return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
@@ -199,7 +208,9 @@ def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, 
         match_id = None
         match_found = False
         for index, match in enumerate(match_list):
-            match_info = tft_watcher.match.by_id(region, match)
+            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+                match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
+
             if mode == "GameMode":
                 if match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
                     if game_num > 1:
@@ -222,7 +233,8 @@ def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, 
             return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None, 0, None
 
         # Fetch match details
-        match_info = tft_watcher.match.by_id(region, match_id)
+        async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
         players_data = []
         
         player_elos = 0
@@ -241,8 +253,7 @@ def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, 
             rank_icon = None
 
             # Check elos of all players to calculate average
-            summoner = tft_watcher.summoner.by_puuid(region, player_puuid)
-            rank_info = tft_watcher.league.by_summoner(region, summoner['id'])
+            rank_info = await get_rank_info(region, puuid, riot_token)
 
             tier_and_rank = ""
             ranked_players = 8
@@ -261,7 +272,8 @@ def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, 
                 ranked_players-=1
 
             # Fetch gameName and tagLine from PUUID
-            riot_id_info = riot_watcher.account.by_puuid(mass_region, player_puuid)
+            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+                riot_id_info = await client.get_account_v1_by_puuid(region=mass_region, puuid=player_puuid)
 
             if 'gameName' in riot_id_info and 'tagLine' in riot_id_info:
                 player_name = f"{riot_id_info['gameName']}#{riot_id_info['tagLine']}"
@@ -302,46 +314,48 @@ def last_match(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, 
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Get recent x matches
-def recent_matches(gameName, tagLine, mode, mass_region, riot_watcher, tft_watcher, region, num_matches):
-
-    puuid = get_puuid(gameName, tagLine, mass_region, riot_watcher)
+async def recent_matches(gameName, tagLine, mode, mass_region, riot_token, num_matches):
+    puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
-
     try:
         # Fetch the latest x matches
-        match_list = tft_watcher.match.by_puuid(region, puuid, count=30) # 30 is arbitrary
         placements = []
         real_num_matches = 0
-        if not match_list:
-            print(f"No matches found for {gameName}#{tagLine}.")
-            return f"No matches found for {gameName}#{tagLine}.", None, None
         if num_matches > 20 or num_matches < 0:
             print(f"Please enter a number between 1 and 20.")
             return f"Please enter a number between 1 and 20.", None, None
+        
+        async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+            if not match_list:
+                print(f"No matches found for {gameName}#{tagLine}.")
+                return f"No matches found for {gameName}#{tagLine}.", None, None
 
-        for match in match_list:
-            match_info = tft_watcher.match.by_id(region, match)
-            if mode == "GameMode":
-                if match_info['info']['queue_id'] > dicts.game_type_to_id[mode] and num_matches > 0:
-                    num_matches -= 1
-                    real_num_matches += 1
-                    for participant in match_info['info']['participants']:
-                        player_puuid = participant['puuid']
-                        if player_puuid == puuid:
-                            placements.append(participant['placement'])
-                            break
-
-            else:
-                if match_info['info']['queue_id'] == dicts.game_type_to_id[mode] and num_matches > 0:
-                    num_matches -= 1
-                    real_num_matches += 1
-                    for participant in match_info['info']['participants']:
-                        player_puuid = participant['puuid']
-                        if player_puuid == puuid:
-                            placements.append(participant['placement'])
-                            break
+            for match in match_list:
+                match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
+                if mode == "GameMode":
+                    if match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
+                        num_matches -= 1
+                        real_num_matches += 1
+                        for participant in match_info['info']['participants']:
+                            player_puuid = participant['puuid']
+                            if player_puuid == puuid:
+                                placements.append(participant['placement'])
+                                break
+                else:
+                    if match_info['info']['queue_id'] == dicts.game_type_to_id[mode]:
+                        num_matches -= 1
+                        real_num_matches += 1
+                        for participant in match_info['info']['participants']:
+                            player_puuid = participant['puuid']
+                            if player_puuid == puuid:
+                                placements.append(participant['placement'])
+                                break
+                if num_matches <= 0:
+                    break
+                
         if real_num_matches == 0:
             print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
             return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None

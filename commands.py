@@ -6,26 +6,24 @@ import asyncio
 import random
 import time
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
-
 from collections import Counter
 from discord.ui import View
 from discord.ext import commands
 from PIL import Image
 from io import BytesIO
+from pulsefire.clients import RiotAPIClient
+from pulsefire.taskgroups import TaskGroup
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
-    def __init__(self, bot, tft_watcher, riot_watcher, collection, region, mass_region, champ_mapping, item_mapping, riot_token, trait_icon_mapping, companion_mapping):
+    def __init__(self, bot, riot_token, collection, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping):
         self.bot = bot
-        self.tft_watcher = tft_watcher
-        self.riot_watcher = riot_watcher
+        self.riot_token = riot_token
         self.collection = collection
         self.region = region
         self.mass_region = mass_region
         self.champ_mapping = champ_mapping
         self.item_mapping = item_mapping
-        self.riot_token = riot_token
         self.trait_icon_mapping = trait_icon_mapping
         self.companion_mapping = companion_mapping
 
@@ -58,7 +56,7 @@ class BotCommands(commands.Cog):
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
         if data:
-            rank_embed, error_message = helpers.get_rank_embed(gameName, tagLine, self.mass_region, self.riot_watcher, self.tft_watcher, self.region)  # Unpack tuple
+            rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, self.mass_region, self.region, self.riot_token)  # Unpack tuple
 
             if error_message:
                 await ctx.send(error_message)  # Send error as text
@@ -123,9 +121,7 @@ You can also add a number as the first argument to specify which match you are l
             return
 
         # Fetch match data asynchronously
-        result, match_id, avg_rank, master_plus_lp, time = await asyncio.to_thread(
-            helpers.last_match, gameName, tagLine, game_type, self.mass_region, self.riot_watcher, self.tft_watcher, self.region, match_index
-        )
+        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.region, match_index)
 
         embed = discord.Embed(
             title=f"Recent {game_type} TFT Match Placements:",
@@ -135,14 +131,12 @@ You can also add a number as the first argument to specify which match you are l
         embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
         await ctx.send(embed=embed)
 
-        match_info = await asyncio.to_thread(
-            self.tft_watcher.match.by_id, self.region, match_id
-        )
+        async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
+            match_info = await client.get_tft_match_v1_match(region=self.mass_region, id=match_id)
+
         participants = match_info['info']['participants']
 
-        puuid = await asyncio.to_thread(
-            helpers.get_puuid, gameName, tagLine, self.mass_region, self.riot_watcher
-        )
+        puuid = await helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_token)
 
         # Sort in ascending order
         if puuid not in [p['puuid'] for p in participants]:
@@ -335,23 +329,26 @@ You can also add a number as the first argument to specify which match you are l
         all_users = self.collection.find()
         # Create a list to store all users' elo and name
         user_elo_and_name = []
-        def add_user(user):
+        async def process_user(user):
             name = user['name']
             tag = user['tag']
+            try:
+                puuid = await helpers.get_puuid(name, tag, self.mass_region, self.riot_token)
+                if not puuid:
+                    await ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
+                    return
+                
+                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, self.region)
+                name_and_tag = f"{name}#{tag}"
+                user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid))
+            except Exception as e:
+                await ctx.send(f"Error processing {name}#{tag}: {e}")
 
-            puuid = helpers.get_puuid(name, tag, self.mass_region, self.riot_watcher)
-            
-            if not puuid:
-                ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
-            
-            user_elo = helpers.calculate_elo(puuid, self.tft_watcher, self.region)
-            name_and_tag = name + "#" + tag
-            
-            # Append each user's data (elo, name_and_tag) to the list
-            user_elo_and_name.append((user_elo, name_and_tag, puuid))
-
-        for user in all_users:
-            add_user(user)
+        async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
+            async with TaskGroup(asyncio.Semaphore(20)) as tg:
+                for user in all_users:
+                    await tg.create_task(process_user(user))
+        
         
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
@@ -361,22 +358,14 @@ You can also add a number as the first argument to specify which match you are l
         print(execution_time)
 
         # Prepare the leaderboard result
-        for index, (user_elo, name_and_tag, puuid) in enumerate(user_elo_and_name):
+        for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
-            summoner = self.tft_watcher.summoner.by_puuid(self.region, puuid)
-            rank_info = self.tft_watcher.league.by_summoner(self.region, summoner['id'])
-            
-            for entry in rank_info:
-                if entry['queueType'] == 'RANKED_TFT':
-                    tier = entry['tier']
-                    division = entry['rank']
-                    lp = entry['leaguePoints']
-                    icon = dicts.tier_to_rank_icon[tier]
+            icon = dicts.tier_to_rank_icon[user_tier]
             
             if name == gameName and tag == tagLine:
-                result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {tier} {division} • {lp} LP**\n"
+                result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
             else:
-                result += f"**{index + 1}** - {name_and_tag}: {icon} {tier} {division} • {lp} LP\n"
+                result += f"**{index + 1}** - {name_and_tag}: {icon} {user_tier} {user_rank} • {user_lp} LP\n"
  
         lb_embed = discord.Embed(
             title=f"Overall Bot Ranked Leaderboard",
@@ -391,7 +380,7 @@ You can also add a number as the first argument to specify which match you are l
     # Commnad to check the lp cutoff for challenger and grandmaster
     @commands.command(name="cutoff", aliases=["cutoffs, challenger, grandmaster, grandmasters, lpcutoff, chall, gm"])
     async def cutoff(self, ctx):
-        challenger_cutoff, grandmaster_cutoff = helpers.get_cutoff(self.tft_watcher, self.region)
+        challenger_cutoff, grandmaster_cutoff = await helpers.get_cutoff(self.riot_token, self.region)
         cutoff_embed = discord.Embed(
             title=f"Cutoff LPs",
             description=f"<:RankChallenger:1336405530444431492> Challenger Cutoff: {challenger_cutoff}\n<:RankGrandmaster:1336405512887078923> Grandmaster Cutoff: {grandmaster_cutoff}",
@@ -471,7 +460,7 @@ You can also add a number as the first argument to specify which match you are l
 You can also add a number as the first argument to specify how many matches to include.""")
 
         if data:
-            error_message, placements, real_num_matches = helpers.recent_matches(gameName, tagLine, game_type, self.mass_region, self.riot_watcher, self.tft_watcher, self.region, num_matches)  # Unpack tuple
+            error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, game_type, self.mass_region, self.riot_token, num_matches)  # Unpack tuple
 
             if error_message:
                 await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed
@@ -563,11 +552,11 @@ You can also add a number as the first argument to specify how many matches to i
 
         if data:
             text = ""
-            puuid = helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_watcher)
+            puuid = await helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_token)
             if not puuid:
                 text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
-            summoner = self.tft_watcher.summoner.by_puuid(self.region, puuid)
-            rank_info = self.tft_watcher.league.by_summoner(self.region, summoner['id'])
+    
+            rank_info = await helpers.get_rank_info(self.region, puuid, self.riot_token)
             db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
             if not db_user_data:
                 text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
@@ -602,36 +591,52 @@ You can also add a number as the first argument to specify how many matches to i
                     lp_diff = str(elo_diff)
                     lp_diff_emoji = "📉"
                 today_games = total_games - db_games
-                match_list = self.tft_watcher.match.by_puuid(self.region, puuid, count=20)
-                placements = []
-                num_matches = today_games
-                if not match_list:
-                    text = f"No matches found for {gameName}#{tagLine}."
+                async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
+                    match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=self.mass_region, puuid=puuid)
+                    
+                    if not match_list:
+                        return f"No matches found for {gameName}#{tagLine}."
+                    
+                    placements = []
+                    num_matches = today_games
 
-                for match in match_list:
-                    match_info = self.tft_watcher.match.by_id(self.region, match)
-                    if match_info['info']['queue_id'] == dicts.game_type_to_id["Ranked"] and num_matches > 0:
-                        num_matches -= 1
-                        for participant in match_info['info']['participants']:
-                            player_puuid = participant['puuid']
-                            if player_puuid == puuid:
-                                placements.append(participant['placement'])
-                                break
-                total_placement = 0
-                scores = ""
-                for placement in placements:
-                    scores += dicts.number_to_num_icon[placement] + " "
-                    total_placement += placement
+                    for match in match_list:
+                        if num_matches <= 0:
+                            break
+                        try:
+                            match_info = await client.get_tft_match_v1_match(region=self.mass_region, id=match)
+                        except Exception as e:
+                            print(f"Error fetching match {match}: {e}")
+                            continue
+                        
+                        if match_info['info']['queue_id'] == dicts.game_type_to_id["Ranked"]:
+                            num_matches -= 1
+                            for participant in match_info['info']['participants']:
+                                if participant['puuid'] == puuid:
+                                    placements.append(participant['placement'])
+                                    break
+                if not placements:
+                    return f"No ranked placements found for {gameName}#{tagLine}."
+
+                total_placement = sum(placements)
+                scores = " ".join(dicts.number_to_num_icon[placement] for placement in placements)
                 avg_placement = round(total_placement / len(placements), 1)
                 rank_icon = dicts.tier_to_rank_icon[tier]
-                text = f"{rank_icon} **Rank: **{tier} {rank} ({lp} LP)\n📊 **Games Played:** {today_games}\n⭐ **AVP:** {avg_placement}\n{lp_diff_emoji} **LP Difference:** {lp_diff}\n🏅 **Scores: **"
-                final_text = text + scores
+                text = (
+                    f"{rank_icon} **Rank: **{tier} {rank} ({lp} LP)\n"
+                    f"📊 **Games Played:** {today_games}\n"
+                    f"⭐ **AVP:** {avg_placement}\n"
+                    f"{lp_diff_emoji} **LP Difference:** {lp_diff}\n"
+                    f"🏅 **Scores: **{scores}"
+                )
+
             embed = discord.Embed(
                         title=f"Today: {gameName}#{tagLine}",
-                        description=final_text,
+                        description=text,
                         color=discord.Color.blue()
                     )
-            companion_content_ID = helpers.get_last_game_companion(gameName, tagLine, self.mass_region, self.riot_watcher, self.tft_watcher, self.region)
+            
+            companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, self.mass_region, self.riot_token)
             companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
             companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
             embed.set_thumbnail(url=companion_url)
@@ -661,5 +666,5 @@ You can also add a number as the first argument to specify how many matches to i
 
 # Add this class as a cog to main
 async def setup(bot):
-    await bot.add_cog(BotCommands(bot, bot.tft_watcher, bot.riot_watcher, bot.collection, bot.region, 
-                                  bot.mass_region, bot.champ_mapping, bot.item_mapping, bot.riot_token, bot.trait_icon_mapping, bot.companion_mapping))
+    await bot.add_cog(BotCommands(bot, bot.riot_token, bot.collection, bot.region, 
+                                  bot.mass_region, bot.champ_mapping, bot.item_mapping,  bot.trait_icon_mapping, bot.companion_mapping))
