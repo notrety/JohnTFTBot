@@ -480,7 +480,7 @@ You can also add a number as the first argument to specify how many matches to i
                 total_placement = 0
                 text = ""
                 for idx, placement in enumerate(placements):
-                    if idx == 9 and real_num_matches == 20:
+                    if idx == 9:
                         text += dicts.number_to_num_icon[placement] + "\n"
                     else:
                         text += dicts.number_to_num_icon[placement] + " "
@@ -490,26 +490,40 @@ You can also add a number as the first argument to specify how many matches to i
                         if int(placement) == 1:
                             firsts += 1
                 avg_placement = round(total_placement / len(placements), 1)
-                text += f"\nFirsts: {firsts}\nTop 4s: {top4s}\nAverage Placement: {avg_placement}"
+                text += f"\n\n:first_place: Firsts: {firsts}\n:dart: Top 4s: {top4s}\n:bar_chart: Average Placement: {avg_placement}"
 
-                x_labels = list(range(1, 9))
+                x_labels = list(range(1, 9)) # sets ticks 1 to 8 at every 1
                 counts = Counter(placements)
                 frequencies = [counts.get(num, 0) for num in x_labels]
-                
                 max_frequency = max(frequencies)
                 num_ticks = max(5, max_frequency)  # Minimum 5 ticks
-                y_labels = list(range(1, num_ticks+1))
+                y_labels = list(range(1, num_ticks+1)) # Sets ticks = to higher freq or 5 
+
                 # Create the plot
                 fig, ax = plt.subplots()
-                ax.bar(x_labels, frequencies, color='skyblue')
-                ax.set_xlabel('Placement')
-                ax.set_ylabel('Count')
-                ax.set_title('Placement Frequency')
-                ax.set_xticks(x_labels)  # X-axis 1-8
+                bar_colors = ['#F0B52B', '#969696', '#A45F00', '#595988', '#596263', '#596263', '#596263', '#596263']
+
+                ax.bar(x_labels, frequencies, color=bar_colors)
+                # ax.set_xlabel('Placement', color = "white", fontsize=14)
+                ax.set_ylabel('Count', color = "white", fontsize=17)
+                # ax.set_title('Placement Frequency', color = "white")
+                ax.set_xticks(x_labels)
                 ax.set_yticks(y_labels)
+                [t.set_color('white') for t in ax.xaxis.get_ticklabels()]
+                [t.set_color('white') for t in ax.yaxis.get_ticklabels()]
+                ax.tick_params(axis='x', color = 'white', labelsize=16)
+                ax.tick_params(axis='y', color = 'white', labelsize=16)
+
+                for spine in ax.spines.values():
+                    spine.set_edgecolor('white')
+
                 filename = 'placements.png'
-                plt.savefig(filename)
+                plt.tight_layout(pad=0.8)
+                plt.savefig(filename,transparent=True,dpi=300)
                 plt.close()
+                img = Image.open(filename)
+                img = img.resize((240, 180))  # Width, Height in pixels
+                img.save(filename)
                 embed = discord.Embed(
                     title=f"Recent {real_num_matches} {game_type} Matches for {gameName}#{tagLine}",
                     description=text,
