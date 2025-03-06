@@ -22,7 +22,6 @@ async def store_elo_and_games(collection, mass_region, riot_token, region):
             if entry['queueType'] == 'RANKED_TFT':
                 total_games = entry['wins'] + entry['losses']
                 elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
-
         collection.update_one(
                 {"name": user["name"], "tag": user["tag"]},
                 {"$set": {"games": total_games, "elo": elo}}

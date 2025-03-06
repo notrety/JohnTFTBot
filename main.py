@@ -92,27 +92,26 @@ bot.companion_mapping = companion_mapping
 
 # Take a snapshot of games and LP for !today command
 async def scheduler():
-    """Runs the scheduled task at 5 AM EST every day."""
+    """Runs the scheduled task at 1 AM EST every day."""
     await bot.wait_until_ready()  # Ensure bot is fully loaded before running the task
     eastern = pytz.timezone("America/New_York")
 
     while not bot.is_closed():
         now = datetime.datetime.now(eastern)
-        target_time = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        target_time = now.replace(hour=1, minute=0, second=0, microsecond=0)
 
         if now > target_time:
-            target_time += datetime.timedelta(days=1)  # Schedule for next day if already past 6 AM
+            target_time += datetime.timedelta(days=1)  # Schedule for next day if already past 1 AM
 
         wait_time = (target_time - now).total_seconds()
 
-        await asyncio.sleep(wait_time)  # Wait until 5 AM EST
+        await asyncio.sleep(wait_time)  # Wait until 1 AM EST
         await helpers.store_elo_and_games(collection, mass_region, riot_token, region)  # Run the task
 
 # Show bot is online and invoke scheduled snapshot functionality
 @bot.event
 async def on_ready():
-    print(f'Bot is online as {bot.user}')
-    #bot.loop.create_task(scheduler())  # Start the scheduler in the background
+    bot.loop.create_task(scheduler())  # Start the scheduler in the background
     try:
         # Load the commands cog after the bot is ready
         await bot.load_extension('commands')  # Make sure this is awaited
@@ -120,6 +119,7 @@ async def on_ready():
         print(f"Synced slash commands for {bot.user}")
     except Exception as e:
         print(f"Failed to load extension: {e}")
+    print(f'Bot is online as {bot.user}')
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -132,7 +132,7 @@ async def on_command(ctx):
     print(f"Command used: {ctx.command} at {timestamp}")
 
 # Only uncomment to manually run snapshot function
-#helpers.store_elo_and_games(collection, mass_region, riot_watcher, tft_watcher, region)
+#asyncio.run(helpers.store_elo_and_games(collection, mass_region, riot_token, region))
 
 # Run the bot with your token
 bot.run(bot_token)
