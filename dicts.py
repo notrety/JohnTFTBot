@@ -39,7 +39,7 @@ rank_to_elo = {
 game_type_to_id = {
     "Ranked": 1100,
     "Normal": 1090,
-    "Double Up ": 1160,
+    "Double Up": 1160,
     "Hyper Roll": 1130,
     # "Fortune's Favor": 1170,
     # "Soul Brawl": 1180,
@@ -79,6 +79,7 @@ rarity_map = {
 
 # Map tier to rank_icon emotes
 tier_to_rank_icon = {
+    "UNRANKED": "<:RankNone:1347101541588271146>",
     "IRON": "<:RankIron:1336405365226733620>",
     "BRONZE": "<:RankBronze:1336405390270660708>",
     "SILVER": "<:RankSilver:1336405406007951481>",

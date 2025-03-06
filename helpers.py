@@ -40,20 +40,21 @@ async def get_cutoff(riot_token, region):
     # grab all players who are challenger, grandmaster, and master
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
         challengers = await client.get_tft_league_v1_challenger_league(region=region)
-        grandmasters = await client.get_tft_league_v1_grandmaster_league(region=region)
+        grandmasters = await client.get_tft_league_v1_grandmaster_league(region=region)        
         masters = await client.get_tft_league_v1_master_league(region=region)
 
-    # put all the lps into a list
-    lps = [entry.get('leaguePoints') for entry in challengers['entries']]
-    lps.extend(entry.get('leaguePoints') for entry in grandmasters['entries'])
-    lps.extend(entry.get('leaguePoints') for entry in masters['entries'])
 
-    # sort lps 
-    lps_sorted = sorted(lps, reverse=True)
+        # put all the lps into a list
+        lps = [entry.get('leaguePoints') for entry in challengers['entries']]
+        lps.extend(entry.get('leaguePoints') for entry in grandmasters['entries'])
+        lps.extend(entry.get('leaguePoints') for entry in masters['entries'])
 
-    # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
-    challenger_cutoff = max(500,lps_sorted[249])
-    grandmaster_cutoff = max(200,lps_sorted[749])
+        # sort lps 
+        lps_sorted = sorted(lps, reverse=True)
+
+        # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
+        challenger_cutoff = max(500,lps_sorted[249])
+        grandmaster_cutoff = max(200,lps_sorted[749])
     return challenger_cutoff, grandmaster_cutoff
 
 # Function to get the trait icon path
@@ -210,7 +211,6 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         for index, match in enumerate(match_list):
             async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
                 match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
-
             if mode == "GameMode":
                 if match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
                     if game_num > 1:
@@ -235,8 +235,8 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         # Fetch match details
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+
         players_data = []
-        
         player_elos = 0
 
         # Get timestamp to include in response
@@ -268,6 +268,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
                 rank_icon = dicts.tier_to_rank_icon[tier]
             else: 
                 ranked_players-=1
+                rank_icon = dicts.tier_to_rank_icon["UNRANKED"]
 
             # Fetch gameName and tagLine from PUUID
             async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
@@ -283,7 +284,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
 
         # Sort players by placement
         players_data.sort()
-
+        print("player data sorted")
         # Calculate average lobby elo
         avg_elo = player_elos / ranked_players
         rounded_elo = (avg_elo // 100) * 100  # Round down to the nearest 100, avg elo of 99 should still say iron iv, etc
@@ -305,6 +306,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
             else:
                 result += f"{icon} **{placement}** - {name}\n"
 
+        print("done")
         return result, match_id, avg_rank, master_plus_lp, time_and_time_ago
     
     except Exception as err:
