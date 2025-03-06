@@ -245,7 +245,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         formatted_time = time.strftime('%Y-%m-%d %H:%M:%S') # format nicely
         time_passed = time_ago(timestamp)
         time_and_time_ago = formatted_time + ", " + time_passed
-
+        ranked_players = 8
         # Find player stats
         for participant in match_info['info']['participants']:
             player_puuid = participant['puuid']
@@ -253,10 +253,8 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
             rank_icon = None
 
             # Check elos of all players to calculate average
-            rank_info = await get_rank_info(region, puuid, riot_token)
-
+            rank_info = await get_rank_info(region, player_puuid, riot_token)
             tier_and_rank = ""
-            ranked_players = 8
             for entry in rank_info:
                 if entry['queueType'] == 'RANKED_TFT':
                     tier = entry['tier']
@@ -288,6 +286,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
 
         # Calculate average lobby elo
         avg_elo = player_elos / ranked_players
+        rounded_elo = (avg_elo // 100) * 100  # Round down to the nearest 100, avg elo of 99 should still say iron iv, etc
         master_plus_lp = 0 
         avg_rank = ""
         # Find all keys greater than value
@@ -296,8 +295,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
             avg_rank = "Master+"
             master_plus_lp = int(round(avg_elo - 2800))
         else:
-            keys = [key for key, val in dicts.rank_to_elo.items() if val > avg_elo]
-            avg_rank = keys[0]
+            avg_rank = next((key for key, val in dicts.rank_to_elo.items() if val == rounded_elo), None)
         # Format the message
         result = ""
         for placement, name, icon in players_data:
