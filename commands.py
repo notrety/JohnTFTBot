@@ -320,7 +320,7 @@ You can also add a number as the first argument to specify which match you are l
             )
 
     # Command to check leaderboard of all linked accounts for ranked tft
-    @commands.command()
+    @commands.command(name="lb", aliases=["leaderboard"])
     async def lb(self, ctx):
         start_time = time.perf_counter()  # Start time
         _, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
@@ -378,7 +378,7 @@ You can also add a number as the first argument to specify which match you are l
         await ctx.send(embed=lb_embed)
 
     # Commnad to check the lp cutoff for challenger and grandmaster
-    @commands.command(name="cutoff", aliases=["cutoffs, challenger, grandmaster, grandmasters, lpcutoff, chall, gm"])
+    @commands.command(name="cutoff", aliases=["cutoffs", "challenger", "grandmaster", "grandmasters", "lpcutoff", "chall", "gm"])
     async def cutoff(self, ctx):
         challenger_cutoff, grandmaster_cutoff = await helpers.get_cutoff(self.riot_token, self.region)
         cutoff_embed = discord.Embed(
