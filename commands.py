@@ -238,7 +238,6 @@ You can also add a number as the first argument to specify which match you are l
 
                 for i, item_icon in enumerate(item_icons):
                     champ_final_image.paste(item_icon, (current_x + 23 * i, 97), item_icon)
-
             # Process and paste champions concurrently
             await asyncio.gather(*[paste_champion(unit, x) for unit, x in zip(champ_unit_data, range(0, champ_img_width, 72))])
 
@@ -251,11 +250,16 @@ You can also add a number as the first argument to specify which match you are l
              # Get summoner's gameName and tagLine from the match_info
             gameName = participant.get('riotIdGameName', 'Unknown')
             tagLine = participant.get('riotIdTagline', 'Unknown')
-
+            level = participant.get('level','Unknown')
+            gold_left = participant.get('gold_left','Unknown')
+            stage, round = divmod(participant.get('last_round','Unknown') - 4 , 7)
+            players_eliminated = participant.get('players_eliminated','Unknown')
+            total_damage_to_players = participant.get('total_damage_to_players','Unknown')
+            text = f"<:tft_up_arrow:1347339737014341662> Level: {level}\n💰 Gold Remaining: {gold_left}\n:skull: Last round: {stage+2}-{round}\n:crossed_swords: Players Eliminated: {players_eliminated}\n:drop_of_blood: Damage Dealt: {total_damage_to_players}"
             # Save & Return Image & Embed
             final_combined_image.save("player_board.png")
             file = discord.File("player_board.png", filename="player_board.png")
-            embed = discord.Embed(title=f"{gameName}#{tagLine} - Placement {index + 1}/{len(puuid_list)}", description="")
+            embed = discord.Embed(title=f"{gameName}#{tagLine} - Placement {index + 1}/{len(puuid_list)}", description=text)
             embed.set_image(url="attachment://player_board.png")
 
             return embed, file

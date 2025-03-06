@@ -132,7 +132,7 @@ async def on_command(ctx):
     print(f"Command used: {ctx.command} at {timestamp}")
 
 # Only uncomment to manually run snapshot function
-#asyncio.run(helpers.store_elo_and_games(collection, mass_region, riot_token, region))
+# asyncio.run(helpers.store_elo_and_games(collection, mass_region, riot_token, region))
 
 # Run the bot with your token
 bot.run(bot_token)

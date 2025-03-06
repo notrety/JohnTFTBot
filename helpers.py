@@ -283,7 +283,6 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
 
         # Sort players by placement
         players_data.sort()
-        print("player data sorted")
         # Calculate average lobby elo
         avg_elo = player_elos / ranked_players
         rounded_elo = (avg_elo // 100) * 100  # Round down to the nearest 100, avg elo of 99 should still say iron iv, etc
@@ -305,7 +304,6 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
             else:
                 result += f"{icon} **{placement}** - {name}\n"
 
-        print("done")
         return result, match_id, avg_rank, master_plus_lp, time_and_time_ago
     
     except Exception as err:
