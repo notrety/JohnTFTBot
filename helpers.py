@@ -31,7 +31,7 @@ async def store_elo_and_games(collection, mass_region, riot_token, region):
 
 async def get_rank_info(region, puuid, riot_token):
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
-        summoner = await client.get_lol_summoner_v4_by_puuid(region=region, puuid=puuid)
+        summoner = await client.get_tft_summoner_v1_by_puuid(region=region, puuid=puuid)
         rank_info = await client.get_tft_league_v1_entries_by_summoner(region=region, summoner_id=summoner["id"])
     return rank_info
 
