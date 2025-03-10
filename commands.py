@@ -5,6 +5,7 @@ import dicts
 import asyncio
 import random
 import time
+import os
 import matplotlib.pyplot as plt
 from collections import Counter
 from discord.ui import View
@@ -292,6 +293,7 @@ You can also add a number as the first argument to specify which match you are l
         # --- Send Initial Message ---
         embed, file = await generate_board(current_index)
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
+        os.remove("player_board.png")
 
     # Command to link riot and discord accounts, stored in mongodb database
     @discord.app_commands.command(name="link", description="Link discord account to riot account")
@@ -527,6 +529,8 @@ You can also add a number as the first argument to specify how many matches to i
                 embed.set_image(url="attachment://placements.png")
                 
                 await ctx.send(file=file, embed=embed)
+
+                os.remove("placements.png")
 
     # Command that summarizes todays games, only works for linked accounts
     @commands.command(name="today", aliases=["t"])
