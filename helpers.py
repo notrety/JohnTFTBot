@@ -132,8 +132,7 @@ async def calculate_elo(puuid, riot_token, region):
             for entry in rank_info:
                 if entry['queueType'] == 'RANKED_TFT':
                     return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
-
-            return 0  # If no ranked TFT entry is found
+            return 0, "UNRANKED", "", 0  # If no ranked TFT entry is found
 
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 429:

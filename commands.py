@@ -307,7 +307,7 @@ You can also add a number as the first argument to specify which match you are l
             # If user already has data, update it
             self.collection.update_one(
                 {"discord_id": user_id},
-                {"$set": {"name": name.lower(), "tag": tag.lower()}}
+                {"$set": {"name": name.lower().replace("_", " "), "tag": tag.lower()}}
             )
             await interaction.response.send_message(
                 f"Your data has been updated to: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
@@ -317,7 +317,7 @@ You can also add a number as the first argument to specify which match you are l
             # If no data exists, insert a new document for the user
             self.collection.insert_one({
                 "discord_id": user_id,
-                "name": name.lower(),
+                "name": name.lower().replace("_", " "),
                 "tag": tag.lower()
             })
             await interaction.response.send_message(
