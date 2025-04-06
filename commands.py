@@ -367,12 +367,16 @@ You can also add a number as the first argument to specify which match you are l
         for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
             icon = dicts.tier_to_rank_icon[user_tier]
-            
-            if name == gameName and tag == tagLine:
-                result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+            if user_tier != "UNRANKED":
+                if name == gameName and tag == tagLine:
+                    result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+                else:
+                    result += f"**{index + 1}** - {name_and_tag}: {icon} {user_tier} {user_rank} • {user_lp} LP\n"
             else:
-                result += f"**{index + 1}** - {name_and_tag}: {icon} {user_tier} {user_rank} • {user_lp} LP\n"
- 
+                if name == gameName and tag == tagLine:
+                    result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {user_tier} {user_rank}**\n"
+                else:
+                    result += f"**{index + 1}** - {name_and_tag}: {icon} {user_tier} {user_rank}\n"
         lb_embed = discord.Embed(
             title=f"Overall Bot Ranked Leaderboard",
             description=result,
