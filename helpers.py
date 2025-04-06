@@ -82,7 +82,7 @@ def get_item_icon(items_data, itemName):
             if item.get("nameId") == itemName:
                 return item.get("squareIconPath", "")[21:]
     print(f"{itemName} Not Found")
-    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
+    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set14.png"
 
 def get_companion_icon(companions_json, contentId):
     for companion in companions_json:

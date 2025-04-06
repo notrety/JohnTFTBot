@@ -44,12 +44,12 @@ if response.status_code == 200:
     # Access the 'sets' property
     sets_data = data.get("sets", {})  # Get the 'sets' dictionary, default to empty if not found
     
-    # Access the '13' property within 'sets'
-    set_13 = sets_data.get("13", {})  # Get the '13' property, default to empty dict if not found
+    # Change this property at start of each set
+    current_set = sets_data.get("14", {})
     
-    # Access the 'champions' and 'traits' lists within '13'
-    champ_mapping = set_13.get("champions", [])  # Get the 'champions' list, default to empty list if not found
-    trait_icon_mapping = set_13.get("traits", []) # Get the 'traits' list, default to empty list if not found
+    # Access the 'champions' and 'traits' lists within current set
+    champ_mapping = current_set.get("champions", [])  # Get the 'champions' list, default to empty list if not found
+    trait_icon_mapping = current_set.get("traits", []) # Get the 'traits' list, default to empty list if not found
     print("Traits and Champions parsed successfully")
 else:
     print("Failed to fetch data")
