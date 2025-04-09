@@ -51,8 +51,8 @@ async def get_cutoff(riot_token, region):
         lps_sorted = sorted(lps, reverse=True)
 
         # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
-        challenger_cutoff = max(500,lps_sorted[249])
-        grandmaster_cutoff = max(200,lps_sorted[749])
+        challenger_cutoff = max(500, lps_sorted[249]) if len(lps_sorted) > 249 else 500
+        grandmaster_cutoff = max(200, lps_sorted[749]) if len(lps_sorted) > 749 else 200
     return challenger_cutoff, grandmaster_cutoff
 
 # Function to get the trait icon path
