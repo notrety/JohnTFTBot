@@ -26,7 +26,6 @@ async def store_elo_and_games(collection, mass_region, riot_token, region):
                 {"name": user["name"], "tag": user["tag"]},
                 {"$set": {"games": total_games, "elo": elo}}
             )
-    print("Games and elos stored.")
 # Function to return cutoff lp for challenger and grandmaster
 
 async def get_rank_info(region, puuid, riot_token):

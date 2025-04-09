@@ -107,7 +107,7 @@ async def scheduler():
 
         await asyncio.sleep(wait_time)  # Wait until 1 AM EST
         await helpers.store_elo_and_games(collection, mass_region, riot_token, region)  # Run the task
-        print("Updated elo and games using scheduler.")
+        print("Updated elo and games using scheduler. Time: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 # Show bot is online and invoke scheduled snapshot functionality
 @bot.event
