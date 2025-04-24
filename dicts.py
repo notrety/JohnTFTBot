@@ -103,3 +103,22 @@ number_to_num_icon = {
     7: "<:7th:1341551372432183316>",
     8: "<:8th:1341552569339740271>"
 }
+
+region_to_mass = {
+    "br1": "americas",
+    "eun1": "europe",
+    "euw1": "europe",
+    "jp1": "asia",
+    "kr": "asia",
+    "la1": "americas",
+    "la2": "americas",
+    "na1": "americas",
+    "oc1": "sea",
+    "tr1": "europe",
+    "ru": "europe",
+    "ph2": "sea",
+    "sg2": "sea",
+    "th2": "sea",
+    "tw2": "asia",
+    "vn2": "asia"
+}

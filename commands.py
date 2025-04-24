@@ -45,11 +45,11 @@ class BotCommands(commands.Cog):
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -57,7 +57,7 @@ class BotCommands(commands.Cog):
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
         if data:
-            rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, self.mass_region, self.region, self.riot_token)  # Unpack tuple
+            rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, mass_region, region, self.riot_token)  # Unpack tuple
 
             if error_message:
                 await ctx.send(error_message)  # Send error as text
@@ -77,7 +77,9 @@ class BotCommands(commands.Cog):
             game_type = "Double Up"
         else:
             game_type = "Ranked"
-
+        region = None
+        mass_region = None
+        puuid = None
         match_index = 1
         data = False
         if len(args) == 3:  # Expecting match num, name and tagline
@@ -90,7 +92,7 @@ class BotCommands(commands.Cog):
             mentioned_user = args[1]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 2:
@@ -101,28 +103,34 @@ class BotCommands(commands.Cog):
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 1 and str.isnumeric(args[0]):
             match_index = int(args[0])
-            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
             # User formatted command incorrectly, let them know
             await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n
 You can also add a number as the first argument to specify which match you are looking for.""")
-
         if not data:
             return
 
+        # Use NA1 and americas as default routing values if not found for user
+        if not mass_region:
+            mass_region = self.mass_region
+        if not region:
+            region = self.region
+        if not puuid:
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
         # Fetch match data asynchronously
-        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, self.mass_region, self.riot_token, self.region, match_index)
+        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.riot_token, region, match_index)
 
         embed = discord.Embed(
             title=f"Recent {game_type} TFT Match Placements:",
@@ -133,11 +141,9 @@ You can also add a number as the first argument to specify which match you are l
         await ctx.send(embed=embed)
 
         async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
-            match_info = await client.get_tft_match_v1_match(region=self.mass_region, id=match_id)
+            match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
 
         participants = match_info['info']['participants']
-
-        puuid = await helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_token)
 
         # Sort in ascending order
         if puuid not in [p['puuid'] for p in participants]:
@@ -297,39 +303,68 @@ You can also add a number as the first argument to specify which match you are l
 
     # Command to link riot and discord accounts, stored in mongodb database
     @discord.app_commands.command(name="link", description="Link discord account to riot account")
-    async def link(self, interaction: discord.Interaction, name: str, tag: str):
+    @discord.app_commands.describe(
+        region="List of regions: BR1, EUN1, EUW1, JP1, KR1, LA1, LA2, NA1, OC1, TR1, RU, PH2, SG2, TH2, TW2, VN2"
+    )
+    async def link(self, interaction: discord.Interaction, name: str, tag: str, region: str):
         user_id = str(interaction.user.id)
 
         # Check if the user already has linked data
         existing_user = self.collection.find_one({"discord_id": user_id})
+        mass_region = dicts.region_to_mass[region.lower()]
+        puuid = await helpers.get_puuid(name, tag, mass_region, self.riot_token)
         
         if existing_user:
             # If user already has data, update it
+            if not puuid:
+                await interaction.response.send_message(
+                    f"Could not find {name}#{tag} in region {region}. Please re-link using the correct formatting of `/link <name> <tag>`.",
+                    ephemeral=True  # Sends the response privately to the user
+                )        
+                return
             self.collection.update_one(
                 {"discord_id": user_id},
-                {"$set": {"name": name.lower().replace("_", " "), "tag": tag.lower()}}
+                {"$set": {
+                    "name": name.lower().replace("_", " "),
+                    "tag": tag.lower(),
+                    "region": region.lower(),
+                    "mass_region": mass_region,
+                    "puuid": puuid
+                    }
+                }
             )
             await interaction.response.send_message(
-                f"Your data has been updated to: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
+                f"Your data has been updated to: {name}#{tag} in region {region}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
                 ephemeral=True  # Sends the response privately to the user
             )        
         else:
             # If no data exists, insert a new document for the user
+            if not puuid:
+                await interaction.response.send_message(
+                    f"Could not find {name}#{tag} in region {region}. Please re-link using the correct formatting of `/link <name> <tag>`.",
+                    ephemeral=True  # Sends the response privately to the user
+                )        
+                return
+            
             self.collection.insert_one({
                 "discord_id": user_id,
                 "name": name.lower().replace("_", " "),
-                "tag": tag.lower()
+                "tag": tag.lower(),
+                "region": region.lower(),
+                "mass_region": mass_region,
+                "puuid": puuid
             })
             await interaction.response.send_message(
-                f"Your data has been linked: {name}#{tag}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
+                f"Your data has been linked: {name}#{tag} in region {region}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
                 ephemeral=True
+                
             )
 
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command(name="lb", aliases=["leaderboard"])
     async def lb(self, ctx):
         start_time = time.perf_counter()  # Start time
-        _, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+        _, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
         result = ""
 
         all_users = self.collection.find()
@@ -338,13 +373,17 @@ You can also add a number as the first argument to specify which match you are l
         async def process_user(user):
             name = user['name']
             tag = user['tag']
+                            
+            # redundant code here to be replaced on global lb patch, this is a temporary bandaid
+            region = self.region
+            mass_region = self.mass_region
             try:
-                puuid = await helpers.get_puuid(name, tag, self.mass_region, self.riot_token)
+                puuid = await helpers.get_puuid(name, tag, mass_region, self.riot_token)
                 if not puuid:
                     await ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
                     return
                 
-                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, self.region)
+                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, region)
                 name_and_tag = f"{name}#{tag}"
                 user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid))
             except Exception as e:
@@ -452,16 +491,16 @@ You can also add a number as the first argument to specify which match you are l
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 1 and str.isnumeric(args[0]):
             num_matches = int(args[0])
-            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -470,7 +509,14 @@ You can also add a number as the first argument to specify which match you are l
 You can also add a number as the first argument to specify how many matches to include.""")
 
         if data:
-            error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, game_type, self.mass_region, self.riot_token, num_matches)  # Unpack tuple
+            if not mass_region:
+                mass_region = self.mass_region
+            if not region:
+                region = self.region
+            if not puuid:
+                puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+
+            error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, game_type, mass_region, self.riot_token, num_matches)  # Unpack tuple
 
             if error_message:
                 await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed
@@ -551,11 +597,11 @@ You can also add a number as the first argument to specify how many matches to i
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -564,11 +610,17 @@ You can also add a number as the first argument to specify how many matches to i
 
         if data:
             text = ""
-            puuid = await helpers.get_puuid(gameName, tagLine, self.mass_region, self.riot_token)
+            if not mass_region:
+                mass_region = self.mass_region
+            if not region:
+                region = self.region
+            if not puuid:
+                puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+
             if not puuid:
                 text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
     
-            rank_info = await helpers.get_rank_info(self.region, puuid, self.riot_token)
+            rank_info = await helpers.get_rank_info(region, puuid, self.riot_token)
             db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
             if not db_user_data:
                 text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
@@ -604,7 +656,7 @@ You can also add a number as the first argument to specify how many matches to i
                     lp_diff_emoji = "📉"
                 today_games = total_games - db_games
                 async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
-                    match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=self.mass_region, puuid=puuid)
+                    match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
                     
                     if not match_list:
                         return f"No matches found for {gameName}#{tagLine}."
@@ -616,7 +668,7 @@ You can also add a number as the first argument to specify how many matches to i
                         if num_matches <= 0:
                             break
                         try:
-                            match_info = await client.get_tft_match_v1_match(region=self.mass_region, id=match)
+                            match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
                         except Exception as e:
                             print(f"Error fetching match {match}: {e}")
                             continue
@@ -648,7 +700,7 @@ You can also add a number as the first argument to specify how many matches to i
                         color=discord.Color.blue()
                     )
             
-            companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, self.mass_region, self.riot_token)
+            companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.riot_token)
             companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
             companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
             embed.set_thumbnail(url=companion_url)

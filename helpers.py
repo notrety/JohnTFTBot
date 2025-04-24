@@ -18,6 +18,9 @@ async def store_elo_and_games(collection, mass_region, riot_token, region):
         if not puuid:
             print(f"Error updating elo and games, couldn't get PUUID for {name}#{tag}")
         rank_info = await get_rank_info(region, puuid, riot_token)
+        if rank_info == "BOT":
+            total_games = 0
+            elo = 0
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 total_games = entry['wins'] + entry['losses']
@@ -29,6 +32,8 @@ async def store_elo_and_games(collection, mass_region, riot_token, region):
 # Function to return cutoff lp for challenger and grandmaster
 
 async def get_rank_info(region, puuid, riot_token):
+    if puuid == "BOT":
+        return "BOT"
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
         summoner = await client.get_tft_summoner_v1_by_puuid(region=region, puuid=puuid)
         rank_info = await client.get_tft_league_v1_entries_by_summoner(region=region, summoner_id=summoner["id"])
@@ -126,6 +131,8 @@ async def calculate_elo(puuid, riot_token, region):
         try:
             # Fetch summoner data
             rank_info = await get_rank_info(region, puuid, riot_token)
+            if rank_info == "BOT":
+                return 0, "UNRANKED", "", 0  # If no ranked TFT entry is found
 
             # Find Ranked TFT entry
             for entry in rank_info:
@@ -152,7 +159,9 @@ async def get_rank_embed(name, tagLine, mass_region, region, riot_token):
 
     try:
         rank_info = await get_rank_info(region, puuid, riot_token)
-
+        if rank_info == "BOT":
+            return None, f"{gameName}#{tagLine} has no ranked TFT games."
+        
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 tier = entry['tier']
@@ -187,12 +196,10 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
-
     try:
         # Fetch the latest 20 matches
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
-
         if not match_list:
             print(f"No matches found for {gameName}#{tagLine}.")
             return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
@@ -232,7 +239,6 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         # Fetch match details
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
-
         players_data = []
         player_elos = 0
 
@@ -252,13 +258,14 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
             # Check elos of all players to calculate average
             rank_info = await get_rank_info(region, player_puuid, riot_token)
             tier_and_rank = ""
-            for entry in rank_info:
-                if entry['queueType'] == 'RANKED_TFT':
-                    tier = entry['tier']
-                    rank = entry['rank']
-                    tier_and_rank = tier + " " + rank
-                    lp = entry['leaguePoints']
-            
+            if rank_info != "BOT":
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_TFT':
+                        tier = entry['tier']
+                        rank = entry['rank']
+                        tier_and_rank = tier + " " + rank
+                        lp = entry['leaguePoints']
+                
             if not tier_and_rank == "":
                 player_elos += dicts.rank_to_elo[tier_and_rank]
                 player_elos += int(lp)
@@ -269,7 +276,10 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
 
             # Fetch gameName and tagLine from PUUID
             async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
-                riot_id_info = await client.get_account_v1_by_puuid(region=mass_region, puuid=player_puuid)
+                if player_puuid == "BOT":
+                    riot_id_info = ""
+                else:
+                    riot_id_info = await client.get_account_v1_by_puuid(region=mass_region, puuid=player_puuid)
 
             if 'gameName' in riot_id_info and 'tagLine' in riot_id_info:
                 player_name = f"{riot_id_info['gameName']}#{riot_id_info['tagLine']}"
@@ -282,7 +292,10 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         # Sort players by placement
         players_data.sort()
         # Calculate average lobby elo
-        avg_elo = player_elos / ranked_players
+        if ranked_players == 0:
+            avg_elo = 0
+        else:    
+            avg_elo = player_elos / ranked_players
         rounded_elo = (avg_elo // 100) * 100  # Round down to the nearest 100, avg elo of 99 should still say iron iv, etc
         master_plus_lp = 0 
         avg_rank = ""
@@ -377,11 +390,14 @@ def check_data(id, collection):
         # If user is linked, use stored data as name and tag
         gameName = user_data['name']
         tagLine = user_data['tag']
+        region = user_data['region']
+        mass_region = user_data['mass_region']
+        puuid = user_data['puuid']
         # Indicates that user has linked data
-        return True, gameName, tagLine
+        return True, gameName, tagLine, region, mass_region, puuid
     else:
         # If user isn't linked, inform the user
-        return False, None, None
+        return False, None, None, None, None, None
     
 # Function to check if user is linked based on name and tag
 def check_data_name_tag(name, tag, collection):
