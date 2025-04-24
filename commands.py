@@ -480,7 +480,7 @@ You can also add a number as the first argument to specify which match you are l
             mentioned_user = args[1]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 2:
