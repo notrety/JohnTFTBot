@@ -482,9 +482,8 @@ def time_ago(timestamp):
         return f"{int(years)} years ago"
 
 # Helper function to take in arguments for compare command
-def take_in_compare_args(args, collection, author_id):
-    error_message = ""
-    data = False
+async def take_in_compare_args(args, collection, author_id, riot_token):
+    data = error_message = p1_name = p1_tag = p1_region = p1_puuid = p2_name = p2_tag = p2_region = p2_puuid = None
     if len(args) == 4:  # Expecting player 1 name, p1 tag, p2 name, p2 tag
         p1_name = args[0]
         p1_tag = args[1]
@@ -495,7 +494,7 @@ def take_in_compare_args(args, collection, author_id):
         mentioned_user = args[0]
         user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
         # Check if user is linked
-        data, p1_name, p1_tag = check_data(user_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(user_id, collection)
         if not data:
             error_message = f"{mentioned_user} has not linked their name and tagline."
         p2_name = args[1]
@@ -504,7 +503,7 @@ def take_in_compare_args(args, collection, author_id):
         mentioned_user = args[2]
         user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
         # Check if user is linked
-        data, p2_name, p2_tag = check_data(user_id, collection)
+        data, p2_name, p2_tag, p2_region, _, p2_puuid = check_data(user_id, collection)
         if not data:
             error_message = f"{mentioned_user} has not linked their name and tagline."
         p1_name = args[0]
@@ -515,34 +514,40 @@ def take_in_compare_args(args, collection, author_id):
         user1_id = user1.strip("<@!>")  # Remove the ping format to get the user ID
         user2_id = user2.strip("<@!>")
         # Check if both users are linked
-        data, p1_name, p1_tag = check_data(user1_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(user1_id, collection)
         if not data:
             error_message = f"{user1} has not linked their name and tagline. "
-        data, p2_name, p2_tag = check_data(user2_id, collection)
+        data, p2_name, p2_tag, p2_region, _, p2_puuid = check_data(user2_id, collection)
         if not data:
             error_message += f"{user2} has not linked their name and tagline."
     elif len(args) == 2:  # Expect p1 to be linked, args to be p2 name and tag
-        data, p1_name, p1_tag = check_data(author_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(author_id, collection)
         if not data:
             error_message = "You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account."
         p2_name = args[0]
         p2_tag = args[1]
     elif len(args) == 1 and args[0].startswith("<@"): # Expect p1 to be linked, args to be pinged user
-        data, p1_name, p1_tag = check_data(author_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(author_id, collection)
         if not data:
             error_message = "You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account."
         mentioned_user = args[0]
         user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
         # Check if user is linked
-        data, p2_name, p2_tag = check_data(user_id, collection)
+        data, p2_name, p2_tag, p2_region, _, p2_puuid = check_data(user_id, collection)
         if not data:
             error_message = f"{mentioned_user} has not linked their name and tagline."
     else: 
         # User formatted command incorrectly, let them know
         error_message = "Please use this command by typing in two names and taglines (all separated with spaces), " \
         "by pinging two people, or typing one name and tag if you are linked and comparing to yourself."
-        p1_name = ""
-        p1_tag = ""
-        p2_name = ""
-        p2_tag = ""
-    return data, error_message, p1_name, p1_tag, p2_name, p2_tag
+
+    if not p1_region:
+        p1_region = "na1"
+    if not p2_region:
+        p2_region = "na1"
+    if not p1_puuid:
+        p1_puuid = await get_puuid(p1_name, p1_tag, "americas", riot_token)
+    if not p2_puuid:
+        p2_puuid = await get_puuid(p2_name, p2_tag, "americas", riot_token)
+
+    return data, error_message, p1_name, p1_tag, p1_region, p1_puuid, p2_name, p2_tag, p2_region, p2_puuid
