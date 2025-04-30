@@ -743,21 +743,7 @@ You can also add a number as the first argument to specify how many matches to i
                         p2_total_games = p2_entry['wins'] + p2_entry['losses']
                         p2_top_four_rate = round(p2_entry['wins'] / p2_total_games * 100, 2) if p2_total_games else 0
                         p2_elo = dicts.rank_to_elo[p2_tier + " " + p2_rank] + int(p2_lp)
-                #text = f"{p1_tier} {p1_rank} • {p1_lp} {'<' if p1_elo > p2_elo else '>' if p1_elo < p2_elo else '='} {p2_tier} {p2_rank} • {p2_lp}"
-#                 text = f"""
-# ┌──────────────┬──────────────┬──────────────┐
-# │ {p1_gameName:<12} │     TFT      │ {p2_gameName:<12} │
-# ├──────────────┼──────────────┼──────────────┤
-# │ {p1_tier} {p1_rank} {p1_lp} LP │    Rank      │ {p2_tier} {p2_rank} {p2_lp} LP │
-# └──────────────┴──────────────┴──────────────┘
-# """
-
-#                 text = f"""```{text}```"""
-#                 embed = discord.Embed(
-#                         title=f"{p1_gameName}#{p1_tag} | {p2_gameName}#{p2_tag}",
-#                         description=text,
-#                         color=discord.Color.blue()
-#                     )
+                        
                 embed = discord.Embed(
                     title=f"Comparing Profiles: {p1_gameName}#{p1_tag} and {p2_gameName}#{p2_tag}",
                     color=discord.Color.blue()
