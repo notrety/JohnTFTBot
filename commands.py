@@ -707,21 +707,75 @@ You can also add a number as the first argument to specify how many matches to i
             embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
             await ctx.send(embed=embed)
 
-    # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
-    @commands.command(name="commands", aliases=["c"])
+    # Command to compare the profiles of two players
+    @commands.command(name="compare", aliases=["c"])
+    async def compare(self, ctx, *args): 
+        text = ""
+        data, error_message, p1_name, p1_tag, p2_name, p2_tag = helpers.take_in_compare_args(args, self.collection, ctx.author.id)
+        if data:
+            p1_gameName = p1_name.replace("_", " ")
+            p1_puuid = await helpers.get_puuid(p1_gameName, p1_tag, self.mass_region, self.riot_token)
+            if not p1_puuid:
+                return None, f"Could not find PUUID for {p1_gameName}#{p1_tag}."
+            p2_gameName = p2_name.replace("_", " ")
+            p2_puuid = await helpers.get_puuid(p2_gameName, p2_tag, self.mass_region, self.riot_token)
+            if not p2_puuid:
+                return None, f"Could not find PUUID for {p2_gameName}#{p2_tag}."
+            
+            failedFetch = False
+            try:
+                p1_rank_info = await helpers.get_rank_info(self.region, p1_puuid, self.riot_token)
+            except Exception as err:
+                error_message = f"Error fetching rank info for {p1_gameName}#{p1_tag}: {err}. "
+                failedFetch = True
+            try:
+                p2_rank_info = await helpers.get_rank_info(self.region, p2_puuid, self.riot_token)
+            except Exception as err:
+                error_message += f"Error fetching rank info for {p2_gameName}#{p2_tag}: {err}."
+                failedFetch = True
+            if not failedFetch:
+                for p1_entry in p1_rank_info:
+                    if p1_entry['queueType'] == 'RANKED_TFT':
+                        p1_tier = p1_entry['tier']
+                        p1_rank = p1_entry['rank']
+                        p1_lp = p1_entry['leaguePoints']
+                        p1_total_games = p1_entry['wins'] + p1_entry['losses']
+                        p1_top_four_rate = round(p1_entry['wins'] / p1_total_games * 100, 2) if p1_total_games else 0
+                        p1_elo = dicts.rank_to_elo[p1_tier + " " + p1_rank] + int(p1_lp)
+                for p2_entry in p2_rank_info:
+                    if p2_entry['queueType'] == 'RANKED_TFT':
+                        p2_tier = p2_entry['tier']
+                        p2_rank = p2_entry['rank']
+                        p2_lp = p2_entry['leaguePoints']
+                        p2_total_games = p2_entry['wins'] + p2_entry['losses']
+                        p2_top_four_rate = round(p2_entry['wins'] / p2_total_games * 100, 2) if p2_total_games else 0
+                        p2_elo = dicts.rank_to_elo[p2_tier + " " + p2_rank] + int(p2_lp)
+                text = f"{p1_tier} {p1_rank} • {p1_lp} {'<' if p1_elo > p2_elo else '>' if p1_elo < p2_elo else '='} {p2_tier} {p2_rank} • {p2_lp}"
+                embed = discord.Embed(
+                        title=f"{p1_gameName}#{p1_tag} | {p2_gameName}#{p2_tag}",
+                        description=text,
+                        color=discord.Color.blue()
+                    )
+                await ctx.send(embed=embed)
+        await ctx.send(error_message)
+        return 
+
+    # Command to check all available commands, update as new commands are added (list alphabetically)
+    @commands.command(name="commands", aliases=["command"])
     async def commands(self, ctx): 
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""
-**!r** - View most recent match\n
-**!s** - Check ranked stats for a player\n
-**!lb** - View overall bot leaderboard\n
-**!ping** - Test that bot is active\n
+**!c** - Compare the profiles of two players\n
 **!commands** - Get a list of all commands\n
-**/link** - Link discord account to riot account\n
 **!cutoff** - Show the LP cutoffs for Challenger and GM\n
-**!roll** - Rolls a random number (default 1-100)\n
 **!h** - Display recent placements for a player\n
+**!lb** - View overall bot leaderboard\n
+**/link** - Link discord account to riot account\n
+**!ping** - Test that bot is active\n
+**!r** - View most recent match\n
+**!roll** - Rolls a random number (default 1-100)\n
+**!s** - Check ranked stats for a player\n
 **!t** - Gives summary of today's games
         """,
         color=discord.Color.blue()
