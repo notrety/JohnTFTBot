@@ -9,18 +9,12 @@ from PIL import Image
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 
-async def store_elo_and_games(collection, mass_region, riot_token, region):
+async def store_elo_and_games(collection, riot_token):
     all_users = collection.find()
     for user in all_users:
-        name = user['name']
-        tag = user['tag']
-        puuid = await get_puuid(name, tag, mass_region, riot_token)
-        if not puuid:
-            print(f"Error updating elo and games, couldn't get PUUID for {name}#{tag}")
+        puuid = user.get('puuid')
+        region = user.get('region')
         rank_info = await get_rank_info(region, puuid, riot_token)
-        if rank_info == "BOT":
-            total_games = 0
-            elo = 0
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 total_games = entry['wins'] + entry['losses']
@@ -29,16 +23,14 @@ async def store_elo_and_games(collection, mass_region, riot_token, region):
                 {"name": user["name"], "tag": user["tag"]},
                 {"$set": {"games": total_games, "elo": elo}}
             )
-# Function to return cutoff lp for challenger and grandmaster
-
+        
 async def get_rank_info(region, puuid, riot_token):
-    if puuid == "BOT":
-        return "BOT"
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
         summoner = await client.get_tft_summoner_v1_by_puuid(region=region, puuid=puuid)
         rank_info = await client.get_tft_league_v1_entries_by_summoner(region=region, summoner_id=summoner["id"])
     return rank_info
 
+# Function to return cutoff lp for challenger and grandmaster
 async def get_cutoff(riot_token, region):
     # grab all players who are challenger, grandmaster, and master
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
@@ -56,8 +48,8 @@ async def get_cutoff(riot_token, region):
         lps_sorted = sorted(lps, reverse=True)
 
         # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
-        challenger_cutoff = max(500, lps_sorted[249]) if len(lps_sorted) > 249 else 500
-        grandmaster_cutoff = max(200, lps_sorted[749]) if len(lps_sorted) > 749 else 200
+        challenger_cutoff = max(500,lps_sorted[249])
+        grandmaster_cutoff = max(200,lps_sorted[749])
     return challenger_cutoff, grandmaster_cutoff
 
 # Function to get the trait icon path
@@ -131,8 +123,6 @@ async def calculate_elo(puuid, riot_token, region):
         try:
             # Fetch summoner data
             rank_info = await get_rank_info(region, puuid, riot_token)
-            if rank_info == "BOT":
-                return 0, "UNRANKED", "", 0  # If no ranked TFT entry is found
 
             # Find Ranked TFT entry
             for entry in rank_info:
@@ -151,17 +141,12 @@ async def calculate_elo(puuid, riot_token, region):
                 raise e  # Re-raise other errors
 
 # Function to get rank info from puuid and return embed with rank icon
-async def get_rank_embed(name, tagLine, mass_region, region, riot_token):
+async def get_rank_embed(name, tagLine, region, riot_token, puuid):
     gameName = name.replace("_", " ")
-    puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
-    if not puuid:
-        return None, f"Could not find PUUID for {gameName}#{tagLine}."
 
     try:
         rank_info = await get_rank_info(region, puuid, riot_token)
-        if rank_info == "BOT":
-            return None, f"{gameName}#{tagLine} has no ranked TFT games."
-        
+
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 tier = entry['tier']
@@ -196,10 +181,12 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
     if not puuid:
         print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
+
     try:
         # Fetch the latest 20 matches
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+
         if not match_list:
             print(f"No matches found for {gameName}#{tagLine}.")
             return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
@@ -239,6 +226,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         # Fetch match details
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+
         players_data = []
         player_elos = 0
 
@@ -258,14 +246,13 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
             # Check elos of all players to calculate average
             rank_info = await get_rank_info(region, player_puuid, riot_token)
             tier_and_rank = ""
-            if rank_info != "BOT":
-                for entry in rank_info:
-                    if entry['queueType'] == 'RANKED_TFT':
-                        tier = entry['tier']
-                        rank = entry['rank']
-                        tier_and_rank = tier + " " + rank
-                        lp = entry['leaguePoints']
-                
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    tier = entry['tier']
+                    rank = entry['rank']
+                    tier_and_rank = tier + " " + rank
+                    lp = entry['leaguePoints']
+            
             if not tier_and_rank == "":
                 player_elos += dicts.rank_to_elo[tier_and_rank]
                 player_elos += int(lp)
@@ -276,10 +263,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
 
             # Fetch gameName and tagLine from PUUID
             async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
-                if player_puuid == "BOT":
-                    riot_id_info = ""
-                else:
-                    riot_id_info = await client.get_account_v1_by_puuid(region=mass_region, puuid=player_puuid)
+                riot_id_info = await client.get_account_v1_by_puuid(region=mass_region, puuid=player_puuid)
 
             if 'gameName' in riot_id_info and 'tagLine' in riot_id_info:
                 player_name = f"{riot_id_info['gameName']}#{riot_id_info['tagLine']}"
@@ -292,10 +276,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         # Sort players by placement
         players_data.sort()
         # Calculate average lobby elo
-        if ranked_players == 0:
-            avg_elo = 0
-        else:    
-            avg_elo = player_elos / ranked_players
+        avg_elo = player_elos / ranked_players
         rounded_elo = (avg_elo // 100) * 100  # Round down to the nearest 100, avg elo of 99 should still say iron iv, etc
         master_plus_lp = 0 
         avg_rank = ""
@@ -387,12 +368,12 @@ def check_data(id, collection):
     user_data = collection.find_one({"discord_id": user_id})
 
     if user_data:
-        # If user is linked, use stored data as name and tag
-        gameName = user_data['name']
-        tagLine = user_data['tag']
-        region = user_data['region']
-        mass_region = user_data['mass_region']
-        puuid = user_data['puuid']
+        # If user is linked, return stored data
+        gameName = user_data.get('name')
+        tagLine = user_data.get('tag')
+        region = user_data.get('region')
+        mass_region = user_data.get('mass_region')
+        puuid = user_data.get('puuid')
         # Indicates that user has linked data
         return True, gameName, tagLine, region, mass_region, puuid
     else:
@@ -406,8 +387,11 @@ def check_data_name_tag(name, tag, collection):
     user_data = collection.find_one(query) # Query the database
 
     if user_data:
-        return True
-    return False
+        mass_region = user_data.get('mass_region')
+        region = user_data.get('region')
+        puuid = user_data.get('puuid')
+        return True, mass_region, region, puuid
+    return False, None, None, None
 
 # Command to get trait icon with texture 
 def trait_image(trait_name: str, style: int, trait_icon_mapping):
@@ -497,3 +481,68 @@ def time_ago(timestamp):
         years = time_difference // seconds_in_year
         return f"{int(years)} years ago"
 
+# Helper function to take in arguments for compare command
+def take_in_compare_args(args, collection, author_id):
+    error_message = ""
+    data = False
+    if len(args) == 4:  # Expecting player 1 name, p1 tag, p2 name, p2 tag
+        p1_name = args[0]
+        p1_tag = args[1]
+        p2_name = args[2]
+        p2_tag = args[3]
+        data = True
+    elif len(args) == 3 and args[0].startswith("<@"):  # player 1 is ping, player 2 is name and tag
+        mentioned_user = args[0]
+        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+        # Check if user is linked
+        data, p1_name, p1_tag = check_data(user_id, collection)
+        if not data:
+            error_message = f"{mentioned_user} has not linked their name and tagline."
+        p2_name = args[1]
+        p2_tag = args[2]
+    elif len(args) == 3 and args[2].startswith("<@"):  # player 2 is ping, player 1 is name and tag
+        mentioned_user = args[2]
+        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+        # Check if user is linked
+        data, p2_name, p2_tag = check_data(user_id, collection)
+        if not data:
+            error_message = f"{mentioned_user} has not linked their name and tagline."
+        p1_name = args[0]
+        p1_tag = args[1]
+    elif len(args) == 2 and args[0].startswith("<@") and args[1].startswith("<@"): # both players are pinged
+        user1 = args[0]
+        user2 = args[1]
+        user1_id = user1.strip("<@!>")  # Remove the ping format to get the user ID
+        user2_id = user2.strip("<@!>")
+        # Check if both users are linked
+        data, p1_name, p1_tag = check_data(user1_id, collection)
+        if not data:
+            error_message = f"{user1} has not linked their name and tagline. "
+        data, p2_name, p2_tag = check_data(user2_id, collection)
+        if not data:
+            error_message += f"{user2} has not linked their name and tagline."
+    elif len(args) == 2:  # Expect p1 to be linked, args to be p2 name and tag
+        data, p1_name, p1_tag = check_data(author_id, collection)
+        if not data:
+            error_message = "You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account."
+        p2_name = args[0]
+        p2_tag = args[1]
+    elif len(args) == 1 and args[0].startswith("<@"): # Expect p1 to be linked, args to be pinged user
+        data, p1_name, p1_tag = check_data(author_id, collection)
+        if not data:
+            error_message = "You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account."
+        mentioned_user = args[0]
+        user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
+        # Check if user is linked
+        data, p2_name, p2_tag = check_data(user_id, collection)
+        if not data:
+            error_message = f"{mentioned_user} has not linked their name and tagline."
+    else: 
+        # User formatted command incorrectly, let them know
+        error_message = "Please use this command by typing in two names and taglines (all separated with spaces), " \
+        "by pinging two people, or typing one name and tag if you are linked and comparing to yourself."
+        p1_name = ""
+        p1_tag = ""
+        p2_name = ""
+        p2_tag = ""
+    return data, error_message, p1_name, p1_tag, p2_name, p2_tag

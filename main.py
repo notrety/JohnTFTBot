@@ -98,7 +98,7 @@ async def scheduler():
 
     while not bot.is_closed():
         now = datetime.datetime.now(eastern)
-        target_time = now.replace(hour=1, minute=0, second=0, microsecond=0)
+        target_time = now.replace(hour=5, minute=0, second=0, microsecond=0)
 
         if now > target_time:
             target_time += datetime.timedelta(days=1)  # Schedule for next day if already past 1 AM
@@ -106,7 +106,7 @@ async def scheduler():
         wait_time = (target_time - now).total_seconds()
 
         await asyncio.sleep(wait_time)  # Wait until 1 AM EST
-        await helpers.store_elo_and_games(collection, mass_region, riot_token, region)  # Run the task
+        await helpers.store_elo_and_games(collection, riot_token)  # Run the task
         print("Updated elo and games using scheduler. Time: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 # Show bot is online and invoke scheduled snapshot functionality
