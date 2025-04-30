@@ -301,12 +301,17 @@ You can also add a number as the first argument to specify which match you are l
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
         os.remove("player_board.png")
 
+    # Redirect user to /link
+    @commands.command()
+    async def link(self, ctx):
+        await ctx.send('Please use /link to link your account.')
+
     # Command to link riot and discord accounts, stored in mongodb database
     @discord.app_commands.command(name="link", description="Link discord account to riot account")
     @discord.app_commands.describe(
         region="List of regions: BR1, EUN1, EUW1, JP1, KR1, LA1, LA2, NA1, OC1, TR1, RU, PH2, SG2, TH2, TW2, VN2"
     )
-    async def link(self, interaction: discord.Interaction, name: str, tag: str, region: str):
+    async def slash_link(self, interaction: discord.Interaction, name: str, tag: str, region: str):
         user_id = str(interaction.user.id)
 
         # Check if the user already has linked data
