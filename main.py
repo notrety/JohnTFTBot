@@ -98,7 +98,7 @@ async def scheduler():
 
     while not bot.is_closed():
         now = datetime.datetime.now(eastern)
-        target_time = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        target_time = now.replace(hour=1, minute=0, second=0, microsecond=0)
 
         if now > target_time:
             target_time += datetime.timedelta(days=1)  # Schedule for next day if already past 1 AM
