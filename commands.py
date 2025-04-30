@@ -707,21 +707,101 @@ You can also add a number as the first argument to specify how many matches to i
             embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
             await ctx.send(embed=embed)
 
-    # Command to check all available commands, UPDATE THIS AS NEW COMMANDS ARE ADDED
-    @commands.command(name="commands", aliases=["c"])
+    # Command to compare the profiles of two players
+    @commands.command(name="compare", aliases=["c"])
+    async def compare(self, ctx, *args): 
+        text = ""
+        data, error_message, p1_name, p1_tag, p1_region, p1_puuid, p2_name, p2_tag, p2_region, p2_puuid = await helpers.take_in_compare_args(args, self.collection, ctx.author.id, self.riot_token)
+        if data:
+            p1_gameName = p1_name.replace("_", " ")
+            p2_gameName = p2_name.replace("_", " ")
+            failedFetch = False
+            try:
+                p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.riot_token)
+            except Exception as err:
+                error_message = f"Error fetching rank info for {p1_gameName}#{p1_tag}: {err}. "
+                failedFetch = True
+            try:
+                p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.riot_token)
+            except Exception as err:
+                error_message += f"Error fetching rank info for {p2_gameName}#{p2_tag}: {err}."
+                failedFetch = True
+            if not failedFetch:
+                for p1_entry in p1_rank_info:
+                    if p1_entry['queueType'] == 'RANKED_TFT':
+                        p1_tier = p1_entry['tier']
+                        p1_rank = p1_entry['rank']
+                        p1_lp = p1_entry['leaguePoints']
+                        p1_total_games = p1_entry['wins'] + p1_entry['losses']
+                        p1_top_four_rate = round(p1_entry['wins'] / p1_total_games * 100, 2) if p1_total_games else 0
+                        p1_elo = dicts.rank_to_elo[p1_tier + " " + p1_rank] + int(p1_lp)
+                for p2_entry in p2_rank_info:
+                    if p2_entry['queueType'] == 'RANKED_TFT':
+                        p2_tier = p2_entry['tier']
+                        p2_rank = p2_entry['rank']
+                        p2_lp = p2_entry['leaguePoints']
+                        p2_total_games = p2_entry['wins'] + p2_entry['losses']
+                        p2_top_four_rate = round(p2_entry['wins'] / p2_total_games * 100, 2) if p2_total_games else 0
+                        p2_elo = dicts.rank_to_elo[p2_tier + " " + p2_rank] + int(p2_lp)
+                        
+                embed = discord.Embed(
+                    title=f"Comparing Profiles: {p1_gameName}#{p1_tag} and {p2_gameName}#{p2_tag}",
+                    color=discord.Color.blue()
+                )
+
+                # Row 1: rank
+                embed.add_field(name="🏆 Rank", value=f"{dicts.tier_to_rank_icon[p1_tier]} {p1_tier} {p1_rank} {p1_lp} LP", inline=True)
+                if p1_elo > p2_elo:
+                    vs_value = "⬅️"
+                elif p1_elo < p2_elo:
+                    vs_value = "➡️"
+                else:
+                    vs_value = "⚖️"
+                embed.add_field(name="\u200b", value=vs_value, inline=True)
+                embed.add_field(name="🏆 Rank", value=f"{dicts.tier_to_rank_icon[p2_tier]} {p2_tier} {p2_rank} {p2_lp} LP", inline=True)
+
+                # Row 2: top 4 rate
+                embed.add_field(name="🎯 Top 4 Rate", value=f"{p1_top_four_rate:.1f}%", inline=True)
+                if p1_top_four_rate > p2_top_four_rate:
+                    top4_value = "⬅️"
+                elif p1_top_four_rate < p2_top_four_rate:
+                    top4_value = "➡️"
+                else:
+                    top4_value = "⚖️"
+                embed.add_field(name="\u200b", value=top4_value, inline=True)
+                embed.add_field(name="🎯 Top 4 Rate", value=f"{p2_top_four_rate:.1f}%", inline=True)
+
+                # Row 3: games played
+                embed.add_field(name="📊 Total Games", value=str(p1_total_games), inline=True)
+                if p1_total_games > p2_total_games:
+                    tot_games_value = "⬅️"
+                elif p1_total_games < p2_total_games:
+                    tot_games_value = "➡️"
+                else:
+                    tot_games_value = "⚖️"
+                embed.add_field(name="\u200b", value=tot_games_value, inline=True)
+                embed.add_field(name="📊 Total Games", value=str(p2_total_games), inline=True)
+
+                await ctx.send(embed=embed)
+        await ctx.send(error_message)
+        return 
+
+    # Command to check all available commands, update as new commands are added (list alphabetically)
+    @commands.command(name="commands", aliases=["command"])
     async def commands(self, ctx): 
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""
-**!r** - View most recent match\n
-**!s** - Check ranked stats for a player\n
-**!lb** - View overall bot leaderboard\n
-**!ping** - Test that bot is active\n
+**!c** - Compare the profiles of two players\n
 **!commands** - Get a list of all commands\n
-**/link** - Link discord account to riot account\n
 **!cutoff** - Show the LP cutoffs for Challenger and GM\n
-**!roll** - Rolls a random number (default 1-100)\n
 **!h** - Display recent placements for a player\n
+**!lb** - View overall bot leaderboard\n
+**/link** - Link discord account to riot account\n
+**!ping** - Test that bot is active\n
+**!r** - View most recent match\n
+**!roll** - Rolls a random number (default 1-100)\n
+**!s** - Check ranked stats for a player\n
 **!t** - Gives summary of today's games
         """,
         color=discord.Color.blue()
