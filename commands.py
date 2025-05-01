@@ -378,16 +378,9 @@ You can also add a number as the first argument to specify which match you are l
         async def process_user(user):
             name = user['name']
             tag = user['tag']
-                            
-            # redundant code here to be replaced on global lb patch, this is a temporary bandaid
-            region = self.region
-            mass_region = self.mass_region
-            try:
-                puuid = await helpers.get_puuid(name, tag, mass_region, self.riot_token)
-                if not puuid:
-                    await ctx.send(f"Error retrieving PUUID for user {name}#{tag}")
-                    return
-                
+            region = user['region']
+            puuid = user['puuid']
+            try:                
                 user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, region)
                 name_and_tag = f"{name}#{tag}"
                 user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid))
