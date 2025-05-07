@@ -40,6 +40,10 @@ class BotCommands(commands.Cog):
         if len(args) == 2:  # Expecting name and tagline
             gameName = args[0]
             tagLine = args[1]
+            linked, _, region, puuid = helpers.check_data_name_tag(gameName, tagLine, self.collection)
+            if not linked: # assume na player
+                region = "na1"
+                puuid = helpers.get_puuid(gameName, tagLine, "americas", self.riot_token)
             data = True
         elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
             mentioned_user = args[0]
@@ -57,12 +61,13 @@ class BotCommands(commands.Cog):
             await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
 
         if data:
-            rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.riot_token, puuid)  # Unpack tuple
+            rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.riot_token, puuid)
 
             if error_message:
-                await ctx.send(error_message)  # Send error as text
+                await ctx.send(error_message)
             else:
-                await ctx.send(embed=rank_embed)  # Send embed
+                await ctx.send(embed=rank_embed)
+
 
     # Command to fetch last match data
     @commands.command(name="recent", aliases=["rs","r","rr","rn","rh","rd","rg"])

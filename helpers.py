@@ -143,10 +143,11 @@ async def calculate_elo(puuid, riot_token, region):
 # Function to get rank info from puuid and return embed with rank icon
 async def get_rank_embed(name, tagLine, region, riot_token, puuid):
     gameName = name.replace("_", " ")
-
-    try:
+    try: 
         rank_info = await get_rank_info(region, puuid, riot_token)
-
+    except Exception as err:
+        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+    if rank_info:
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 tier = entry['tier']
@@ -168,11 +169,8 @@ async def get_rank_embed(name, tagLine, region, riot_token, puuid):
                 embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
 
                 return embed, None  # Return the embed
-    
-        return None, f"{gameName}#{tagLine} has no ranked TFT games."
-
-    except Exception as err:
-        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+            
+    return None, f"{gameName}#{tagLine} is unranked."
 
 # Function to grab previous match data
 async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, game_num):
