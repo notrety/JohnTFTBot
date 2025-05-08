@@ -478,6 +478,9 @@ You can also add a number as the first argument to specify which match you are l
             gameName = args[1]
             tagLine = args[2]
             data = True
+            region = None
+            mass_region = None
+            puuid = None
         elif len(args) == 2 and args[1].startswith("<@"):  # Check if it's a mention
             num_matches = int(args[0])
             mentioned_user = args[1]
@@ -490,6 +493,9 @@ You can also add a number as the first argument to specify which match you are l
             gameName = args[0]
             tagLine = args[1]
             data = True
+            region = None
+            mass_region = None
+            puuid = None
         elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
@@ -518,8 +524,10 @@ You can also add a number as the first argument to specify how many matches to i
                 region = self.region
             if not puuid:
                 puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
-
-            error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, game_type, mass_region, self.riot_token, num_matches)  # Unpack tuple
+                if not puuid:
+                    print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                    return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, puuid, game_type, mass_region, self.riot_token, num_matches)  # Unpack tuple
 
             if error_message:
                 await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed

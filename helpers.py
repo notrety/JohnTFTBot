@@ -301,11 +301,7 @@ async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, g
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Get recent x matches
-async def recent_matches(gameName, tagLine, mode, mass_region, riot_token, num_matches):
-    puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
-    if not puuid:
-        print(f"Could not find PUUID for {gameName}#{tagLine}.")
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+async def recent_matches(gameName, tagLine, puuid, mode, mass_region, riot_token, num_matches):
     try:
         # Fetch the latest x matches
         placements = []
