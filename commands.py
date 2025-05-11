@@ -43,7 +43,7 @@ class BotCommands(commands.Cog):
             linked, _, region, puuid = helpers.check_data_name_tag(gameName, tagLine, self.collection)
             if not linked: # assume na player
                 region = "na1"
-                puuid = helpers.get_puuid(gameName, tagLine, "americas", self.riot_token)
+                puuid = await helpers.get_puuid(gameName, tagLine, "americas", self.riot_token)
             data = True
         elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
             mentioned_user = args[0]
