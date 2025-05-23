@@ -372,12 +372,14 @@ def check_data(id, collection):
         region = user_data.get('region')
         mass_region = user_data.get('mass_region')
         puuid = user_data.get('puuid')
+        discord = user_data.get("discord_id")
         # Indicates that user has linked data
-        return True, gameName, tagLine, region, mass_region, puuid
+        return True, gameName, tagLine, region, mass_region, puuid, discord
     else:
         # If user isn't linked, inform the user
-        return False, None, None, None, None, None
+        return False, None, None, None, None, None, None
     
+
 # Function to check if user is linked based on name and tag
 def check_data_name_tag(name, tag, collection):
     name_with_spaces = name.replace("_", " ")
@@ -388,8 +390,9 @@ def check_data_name_tag(name, tag, collection):
         mass_region = user_data.get('mass_region')
         region = user_data.get('region')
         puuid = user_data.get('puuid')
-        return True, mass_region, region, puuid
-    return False, None, None, None
+        discord = user_data.get("discord_id")
+        return True, mass_region, region, puuid, discord
+    return False, None, None, None, None
 
 # Command to get trait icon with texture 
 def trait_image(trait_name: str, style: int, trait_icon_mapping):
@@ -492,7 +495,7 @@ async def take_in_compare_args(args, collection, author_id, riot_token):
         mentioned_user = args[0]
         user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
         # Check if user is linked
-        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(user_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid, discord = check_data(user_id, collection)
         if not data:
             error_message = f"{mentioned_user} has not linked their name and tagline."
         p2_name = args[1]
@@ -501,7 +504,7 @@ async def take_in_compare_args(args, collection, author_id, riot_token):
         mentioned_user = args[2]
         user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
         # Check if user is linked
-        data, p2_name, p2_tag, p2_region, _, p2_puuid = check_data(user_id, collection)
+        data, p2_name, p2_tag, p2_region, _, p2_puuid, discord = check_data(user_id, collection)
         if not data:
             error_message = f"{mentioned_user} has not linked their name and tagline."
         p1_name = args[0]
@@ -512,26 +515,26 @@ async def take_in_compare_args(args, collection, author_id, riot_token):
         user1_id = user1.strip("<@!>")  # Remove the ping format to get the user ID
         user2_id = user2.strip("<@!>")
         # Check if both users are linked
-        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(user1_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid, discord = check_data(user1_id, collection)
         if not data:
             error_message = f"{user1} has not linked their name and tagline. "
-        data, p2_name, p2_tag, p2_region, _, p2_puuid = check_data(user2_id, collection)
+        data, p2_name, p2_tag, p2_region, _, p2_puuid, discord = check_data(user2_id, collection)
         if not data:
             error_message += f"{user2} has not linked their name and tagline."
     elif len(args) == 2:  # Expect p1 to be linked, args to be p2 name and tag
-        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(author_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid, discord = check_data(author_id, collection)
         if not data:
             error_message = "You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account."
         p2_name = args[0]
         p2_tag = args[1]
     elif len(args) == 1 and args[0].startswith("<@"): # Expect p1 to be linked, args to be pinged user
-        data, p1_name, p1_tag, p1_region, _, p1_puuid = check_data(author_id, collection)
+        data, p1_name, p1_tag, p1_region, _, p1_puuid, discord = check_data(author_id, collection)
         if not data:
             error_message = "You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account."
         mentioned_user = args[0]
         user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
         # Check if user is linked
-        data, p2_name, p2_tag, p2_region, _, p2_puuid = check_data(user_id, collection)
+        data, p2_name, p2_tag, p2_region, _, p2_puuid, discord = check_data(user_id, collection)
         if not data:
             error_message = f"{mentioned_user} has not linked their name and tagline."
     else: 
@@ -549,3 +552,16 @@ async def take_in_compare_args(args, collection, author_id, riot_token):
         p2_puuid = await get_puuid(p2_name, p2_tag, "americas", riot_token)
 
     return data, error_message, p1_name, p1_tag, p1_region, p1_puuid, p2_name, p2_tag, p2_region, p2_puuid
+
+async def is_user_in_guild(guild: discord.Guild, user_id: int) -> bool:
+    try:
+        await guild.fetch_member(user_id)
+        return True
+    except discord.NotFound:
+        return False
+    except discord.Forbidden:
+        print("Missing permissions to fetch member.")
+        return False
+    except discord.HTTPException as e:
+        print(f"HTTP error while fetching member: {e}")
+        return False

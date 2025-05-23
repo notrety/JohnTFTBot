@@ -49,11 +49,11 @@ class BotCommands(commands.Cog):
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, _, puuid = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, _, puuid, discord = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, _, puuid = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, _, puuid, discord = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -97,7 +97,7 @@ class BotCommands(commands.Cog):
             mentioned_user = args[1]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 2:
@@ -108,16 +108,16 @@ class BotCommands(commands.Cog):
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 1 and str.isnumeric(args[0]):
             match_index = int(args[0])
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -371,16 +371,27 @@ You can also add a number as the first argument to specify which match you are l
             )
 
     # Command to check leaderboard of all linked accounts for ranked tft
-    @commands.command(name="lb", aliases=["leaderboard"])
+    @commands.command(name="lb", aliases=["leaderboard", "server", "serverlb"])
     async def lb(self, ctx):
-        start_time = time.perf_counter()  # Start time
-        _, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
+        _, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
         result = ""
+        server = False
+        if ctx.guild and ctx.invoked_with in {"server", "serverlb"}:
+            guild = ctx.guild
+            members = {member.id async for member in guild.fetch_members(limit=None)}
+            server = True
+        else:
+            members = set()
 
         all_users = self.collection.find()
+        
         # Create a list to store all users' elo and name
         user_elo_and_name = []
         async def process_user(user):
+            if server:
+                if not int(user['discord_id']) in members:
+                    return
+
             name = user['name']
             tag = user['tag']
             region = user['region']
@@ -388,7 +399,7 @@ You can also add a number as the first argument to specify which match you are l
             try:                
                 user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, region)
                 name_and_tag = f"{name}#{tag}"
-                user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, region, puuid))
+                user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, region))
             except Exception as e:
                 await ctx.send(f"Error processing {name}#{tag}: {e}")
 
@@ -397,36 +408,30 @@ You can also add a number as the first argument to specify which match you are l
                 for user in all_users:
                     await tg.create_task(process_user(user))
         
-        
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
-        
-        end_time = time.perf_counter()
-        execution_time = end_time - start_time
-        print(execution_time)
 
         # Prepare the leaderboard result
-        for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, region, puuid) in enumerate(user_elo_and_name):
+        for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, region) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
             icon = dicts.tier_to_rank_icon[user_tier]
             if user_tier != "UNRANKED":
                 if name == gameName and tag == tagLine:
                     result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
                 else:
-                    result += f"**{index + 1}** - [__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
             else:
                 if name == gameName and tag == tagLine:
                     result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}**\n"
                 else:
-                    result += f"**{index + 1}** - [__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}\n"
+
         lb_embed = discord.Embed(
-            title=f"Overall Bot Ranked Leaderboard",
+            title="Overall Bot Ranked Leaderboard",
             description=result,
             color=discord.Color.blue()
         )
-        end_time = time.perf_counter()
-        execution_time = end_time - start_time
-        print(execution_time)
+
         await ctx.send(embed=lb_embed)
 
     # Commnad to check the lp cutoff for challenger and grandmaster
@@ -486,7 +491,7 @@ You can also add a number as the first argument to specify which match you are l
             mentioned_user = args[1]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 2:
@@ -500,16 +505,16 @@ You can also add a number as the first argument to specify which match you are l
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 1 and str.isnumeric(args[0]):
             num_matches = int(args[0])
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -608,11 +613,11 @@ You can also add a number as the first argument to specify how many matches to i
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, mass_region, puuid = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
