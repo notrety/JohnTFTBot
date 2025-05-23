@@ -161,12 +161,16 @@ async def get_rank_embed(name, tagLine, region, riot_token, puuid):
 
                 # Create an embed message
                 embed = discord.Embed(
-                    title=f"TFT Stats for {gameName}#{tagLine}",
                     description=f"🏆 **{tier} {rank}** ({lp} LP)\n🎯 **Top 4 Rate:** {top_four_rate}%\n📊 **Total Games:** {total_games}",
                     color=discord.Color.blue()
                 )
                 embed.set_thumbnail(url=rank_icon_url)  # Set the rank icon
                 embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
+                embed.set_author(
+                    name=f"TFT Stats for {gameName}#{tagLine}",
+                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
+                    icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
+                )
 
                 return embed, None  # Return the embed
             

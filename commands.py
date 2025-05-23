@@ -388,7 +388,7 @@ You can also add a number as the first argument to specify which match you are l
             try:                
                 user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, region)
                 name_and_tag = f"{name}#{tag}"
-                user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid))
+                user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, region, puuid))
             except Exception as e:
                 await ctx.send(f"Error processing {name}#{tag}: {e}")
 
@@ -406,19 +406,19 @@ You can also add a number as the first argument to specify which match you are l
         print(execution_time)
 
         # Prepare the leaderboard result
-        for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, puuid) in enumerate(user_elo_and_name):
+        for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, region, puuid) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
             icon = dicts.tier_to_rank_icon[user_tier]
             if user_tier != "UNRANKED":
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
                 else:
-                    result += f"**{index + 1}** - {name_and_tag}: {icon} {user_tier} {user_rank} • {user_lp} LP\n"
+                    result += f"**{index + 1}** - [__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
             else:
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **__{name_and_tag}__: {icon} {user_tier} {user_rank}**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}**\n"
                 else:
-                    result += f"**{index + 1}** - {name_and_tag}: {icon} {user_tier} {user_rank}\n"
+                    result += f"**{index + 1}** - [__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}\n"
         lb_embed = discord.Embed(
             title=f"Overall Bot Ranked Leaderboard",
             description=result,
@@ -650,10 +650,15 @@ You can also add a number as the first argument to specify how many matches to i
                 if total_games == db_games:
                     text = f"No games played today by {gameName}#{tagLine}."
                     embed = discord.Embed(
-                        title=f"Today: {gameName}#{tagLine}",
                         description=text,
                         color=discord.Color.blue()
                     )
+                    embed.set_author(
+                        name=f"Today: {gameName}#{tagLine}",
+                        url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
+                        icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
+                    )
+
                     await ctx.send(embed=embed)
                     return
                 elo_diff = elo - db_elo
@@ -706,11 +711,14 @@ You can also add a number as the first argument to specify how many matches to i
                 )
 
             embed = discord.Embed(
-                        title=f"Today: {gameName}#{tagLine}",
-                        description=text,
-                        color=discord.Color.blue()
-                    )
-            
+                description=text,
+                color=discord.Color.blue()
+            )
+            embed.set_author(
+                name=f"Today: {gameName}#{tagLine}",
+                url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
+                icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
+            )
             companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.riot_token)
             companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
             companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
