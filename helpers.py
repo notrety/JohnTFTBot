@@ -75,10 +75,11 @@ def get_champ_icon(champs_data, characterName):
 # Function to get the item icon path
 def get_item_icon(items_data, itemName):
     for item in items_data:
-            if item.get("nameId") == itemName:
-                return item.get("squareIconPath", "")[21:]
+        if item.get("nameId") == itemName:
+            print(item.get("squareIconPath","")[21:])
+            return item.get("squareIconPath", "")[21:]
     print(f"{itemName} Not Found")
-    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set14.png"
+    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
 
 def get_companion_icon(companions_json, contentId):
     for companion in companions_json:
