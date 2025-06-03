@@ -1,3 +1,4 @@
+import re
 import discord
 import requests
 import os
@@ -75,8 +76,14 @@ intents.message_content = True  # Enable message content intent
 intents.members = True          # Enable server members intent
 intents.presences = True        # Enable presence intent
 
+def bot_prefix(bot, message): 
+    # Only match if "!" is followed by a letter
+    if re.match(r"^![a-zA-Z]", message.content):
+        return "!"
+    return commands.when_mentioned(bot, message)
+
 # Create bot instance
-bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True)
+bot = commands.Bot(command_prefix=bot_prefix, intents=intents, case_insensitive=True)
 # Define regions
 mass_region = "americas"
 region = "na1"        
