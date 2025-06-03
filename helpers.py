@@ -62,11 +62,21 @@ def get_trait_icon(traits_data, traitName):
 
 # Function to get the champ icon path
 def get_champ_icon(champs_data, characterName):
+    # temp patch for nitro, remove after set 14
+    if characterName == "TFT14_SummonLevel4":
+        return "assets/characters/tft14_summonlevel4/hud/tft14_summonlevel4_square.tft_set14"
+    
+    if characterName == "TFT14_SummonLevel2":
+        return "assets/characters/tft14_summonlevel2/hud/tft14_summonlevel2_square.tft_set14"
+    
+    if characterName == "TFT14_Summon_Turret":
+        return "assets/characters/tft14_summon_turret/hud/tft14_summon_turret_square.tft_set14"
+    
     # Loop through each champion in the list
     for champion in champs_data:        
         # Check if the apiName matches the provided characterName
         if champion.get("apiName").lower() == characterName.lower():
-            # Assuming 'champion' dictionary contains a 'squareIcon' key with the icon path
+            # Assuming 'champion' dictionary contains a 'squareIcon' key with the icon pat
             return champion.get("tileIcon", "")[:-4]  # Remove the last 4 characters (usually file extension)
     
     print(f"{characterName} Not Found")
@@ -76,7 +86,6 @@ def get_champ_icon(champs_data, characterName):
 def get_item_icon(items_data, itemName):
     for item in items_data:
         if item.get("nameId") == itemName:
-            print(item.get("squareIconPath","")[21:])
             return item.get("squareIconPath", "")[21:]
     print(f"{itemName} Not Found")
     return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"

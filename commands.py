@@ -227,7 +227,6 @@ You can also add a number as the first argument to specify which match you are l
             # Fetch all champion icons & rarity images concurrently
             await asyncio.gather(*[process_unit(unit) for unit in units])
             champ_unit_data = sorted(champ_unit_data_unsorted, key=lambda x: x['rarity'])
-            print(champ_unit_data)
 
             # Calculate total champion image width
             champ_img_width = sum(unit['width'] for unit in champ_unit_data)

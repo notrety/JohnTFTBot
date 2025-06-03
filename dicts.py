@@ -74,7 +74,8 @@ rarity_map = {
     2: 3,
     1: 2,
     0: 1,
-    9: 1
+    9: 1,
+    7: 1
 }
 
 # Map tier to rank_icon emotes
