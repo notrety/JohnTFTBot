@@ -138,7 +138,7 @@ async def on_command(ctx):
     print(f"Command used: {ctx.command} at {timestamp}")
 
 # Only uncomment to manually run snapshot function
-# asyncio.run(helpers.store_elo_and_games(collection, mass_region, riot_token, region))
+# asyncio.run(helpers.daily_store_stats(collection, riot_token))
 
 # Only uncomment to manually run function to get all set placements (WORK IN PROGRESS, NOT FULLY WORKING YET)
 # asyncio.run(helpers.get_all_set_placements(collection, region, riot_token))

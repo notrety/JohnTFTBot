@@ -57,7 +57,7 @@ async def process_player(player_doc, collection, mass_region, riot_token):
         sum(int(p) * c for p, c in placement_counts.items()) / total_games
         if total_games > 0 else None
     )
-    rounded_avp = round(average_placement, 1)
+    rounded_avp = round(average_placement, 2)
     wins = placement_counts["1"]
     win_rate = 100 * wins / total_games
     rounded_win_rate = round(win_rate, 1)
@@ -117,6 +117,7 @@ async def daily_store_stats(collection, riot_token):
         region = user.get('region')
         games = user.get('games')
         mass_region = user.get('mass_region')
+        placement_counts = user.get('placement_counts')
         rank_info = await get_rank_info(region, puuid, riot_token)
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
@@ -166,9 +167,14 @@ async def daily_store_stats(collection, riot_token):
             wins = user.get("placement_counts")["1"]
             win_rate = 100 * wins / total_games
             rounded_win_rate = round(win_rate, 1)
+            average_placement = (
+                sum(int(p) * c for p, c in placement_counts.items()) / total_games
+                if total_games > 0 else None
+            )
+            rounded_avp = round(average_placement, 2)
             collection.update_one(
                     {"name": user["name"], "tag": user["tag"]},
-                    {"$set": {"games": total_games, "elo": elo, "win_rate": rounded_win_rate}}
+                    {"$set": {"games": total_games, "elo": elo, "win_rate": rounded_win_rate, "average_placement": rounded_avp}}
                 )
         
         
