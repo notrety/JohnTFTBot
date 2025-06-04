@@ -235,6 +235,7 @@ You can also add a number as the first argument to specify which match you are l
 
             # --- Paste Champions & Items ---
             async def paste_champion(unit, current_x):
+                
                 champ_final_image.paste(unit["rarity_resized"], (current_x, 25), unit["rarity_resized"])
                 champ_final_image.paste(unit["icon_resized"], (current_x + 4, 29), unit["icon_resized"])
 
@@ -243,13 +244,14 @@ You can also add a number as the first argument to specify which match you are l
                     tier_resized = await fetch_image(tier_icon_path, (72, 36))
                     champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
 
-                item_urls = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_item_icon(self.item_mapping, item).lower()}" for item in unit["item_names"]]
+                item_urls = [f"https://raw.communitydragon.org/latest/game/{helpers.get_item_icon(self.item_mapping, item).lower()}" for item in unit["item_names"]]
 
                 fetch_tasks = [fetch_image(url, (23, 23)) for url in item_urls]
                 item_icons = await asyncio.gather(*fetch_tasks)
 
                 for i, item_icon in enumerate(item_icons):
                     champ_final_image.paste(item_icon, (current_x + 23 * i, 97), item_icon)
+
             # Process and paste champions concurrently
             await asyncio.gather(*[paste_champion(unit, x) for unit, x in zip(champ_unit_data, range(0, champ_img_width, 72))])
 
