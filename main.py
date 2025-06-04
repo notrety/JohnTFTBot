@@ -10,7 +10,9 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
 
-uri = "mongodb+srv://sosafelix:lee2014kms2017@tfteamusers.deozh.mongodb.net/?retryWrites=true&w=majority&appName=TFTeamUsers"
+load_dotenv()
+
+uri = os.getenv("MONGO_URI")
 
 # Create a new client and connect to the server
 client = MongoClient(uri)
@@ -24,13 +26,9 @@ try:
 except Exception as e:
     print(e)
 
-# Load the .env file
-load_dotenv()
-
 # Get the token
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 riot_token = os.getenv("RIOT_API_TOKEN")
-
 
 # Setting json urls
 json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
@@ -141,6 +139,9 @@ async def on_command(ctx):
 
 # Only uncomment to manually run snapshot function
 # asyncio.run(helpers.store_elo_and_games(collection, mass_region, riot_token, region))
+
+# Only uncomment to manually run function to get all set placements (WORK IN PROGRESS, NOT FULLY WORKING YET)
+# asyncio.run(helpers.get_all_set_placements(collection, region, riot_token))
 
 # Run the bot with your token
 bot.run(bot_token)
