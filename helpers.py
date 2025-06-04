@@ -1,5 +1,7 @@
 # File containing all helper functions for commands
 
+import asyncio
+from collections import Counter
 import discord
 import requests
 import dicts
@@ -9,20 +11,166 @@ from PIL import Image
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 
-async def store_elo_and_games(collection, riot_token):
+async def get_all_set_placements(collection, mass_region, riot_token):
+    players = list(collection.find({}))
+    print("player list obtained")
+    tasks = [process_player(player, collection, mass_region, riot_token) for player in players]
+    await asyncio.gather(*tasks)
+
+async def process_player(player_doc, collection, mass_region, riot_token):
+    puuid = player_doc["puuid"]
+    mass_region = player_doc["mass_region"]
+    name = player_doc["name"]
+    try:
+        match_ids = await get_all_current_set_match_ids(puuid, riot_token, mass_region, target_set=14)
+        print(f"match ids obtained for {name}")
+    except Exception as e:
+        print(f"Error fetching match IDs for {puuid}: {e}")
+        return
+
+    placement_counts = {str(i): 0 for i in range(1, 9)}  # placements 1 through 8
+
+    for match_id in match_ids:
+        print(f"obtaining placement in match {match_id} for {name}")
+        try:
+            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+                match_data = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+            info = match_data["info"]
+
+            for participant in info["participants"]:
+                if participant["puuid"] == puuid:
+                    placement = int(participant["placement"])
+                    if 1 <= placement <= 8:
+                        placement_counts[str(placement)] += 1
+                    break
+
+        except Exception as e:
+            print(f"Error fetching match {match_id}: {e}")
+    print(f"placement counts for {name}: {placement_counts}")
+    # Update MongoDB with placements
+    collection.update_one(
+        {"_id": player_doc["_id"]},
+        {"$set": {"placement_counts": placement_counts}}
+    )
+    total_games = sum(placement_counts.values())
+    average_placement = (
+        sum(int(p) * c for p, c in placement_counts.items()) / total_games
+        if total_games > 0 else None
+    )
+    rounded_avp = round(average_placement, 1)
+    wins = placement_counts["1"]
+    win_rate = 100 * wins / total_games
+    rounded_win_rate = round(win_rate, 1)
+    # Update DB with AVP
+    collection.update_one(
+        {"_id": player_doc["_id"]},
+        {"$set": {"average_placement": rounded_avp}}
+    )
+    # Update Win Rate
+    collection.update_one(
+        {"_id": player_doc["_id"]},
+        {"$set": {"win_rate": rounded_win_rate}}
+    )
+
+async def get_all_current_set_match_ids(puuid, riot_token, mass_region):
+    match_ids = []
+    start = 0
+    batch_size = 100
+    startTime = 1743200400 # Unix timestamp for start of set 14
+
+    while True:
+        try:
+            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+                ids = await client.get_tft_match_v1_match_ids_by_puuid(
+                    region=mass_region,
+                    puuid=puuid,
+                    queries= {"startTime": startTime, "start": start, "count": batch_size}
+                )
+        except Exception as e:
+            print(f"Error fetching match IDs at start={start}: {e}")
+            break
+
+        if not ids:
+            break  # No more matches
+        print(f"ids for {puuid}: {len(ids)}")
+        for match_id in ids:
+            try:
+                async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+                    match_data = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+                    if match_data["info"].get("queue_id") == 1100:
+                        match_ids.append(match_id)
+            except Exception as e:
+                print(f"Error fetching match {match_id}: {e}")
+                continue
+        print(f"match ids for {puuid}: {len(match_ids)}")
+        start += batch_size
+    print(match_ids)
+    return match_ids
+
+
+async def daily_store_stats(collection, riot_token):
     all_users = collection.find()
     for user in all_users:
+        name = user.get('name')
+        tag = user.get('tag')
         puuid = user.get('puuid')
         region = user.get('region')
+        games = user.get('games')
+        mass_region = user.get('mass_region')
         rank_info = await get_rank_info(region, puuid, riot_token)
         for entry in rank_info:
             if entry['queueType'] == 'RANKED_TFT':
                 total_games = entry['wins'] + entry['losses']
                 elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
-        collection.update_one(
-                {"name": user["name"], "tag": user["tag"]},
-                {"$set": {"games": total_games, "elo": elo}}
+        today_games = total_games - games
+        if today_games != 0:
+            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+                match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+                        
+                if not match_list:
+                    return f"No matches found for {name}#{tag}."
+                
+                placements = []
+                num_matches = today_games
+
+                for match in match_list:
+                    if num_matches <= 0:
+                        break
+                    try:
+                        match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
+                    except Exception as e:
+                        print(f"Error fetching match {match}: {e}")
+                        continue
+                    
+                    if match_info['info']['queue_id'] == dicts.game_type_to_id["Ranked"]:
+                        num_matches -= 1
+                        for participant in match_info['info']['participants']:
+                            if participant['puuid'] == puuid:
+                                placements.append(participant['placement'])
+                                break
+            if not placements:
+                return f"No ranked placements found for {name}#{tag}."
+            # Build the $inc update dictionary
+            counts = Counter(placements)
+            update = {
+                f"placement_counts.{placement}": count
+                for placement, count in counts.items()
+            }
+
+            # Perform the update
+            collection.update_one(
+                {"puuid": puuid},  # Find the player
+                {"$inc": update}   # Increment only the placements that occurred today
             )
+
+            wins = user.get("placement_counts")["1"]
+            win_rate = 100 * wins / total_games
+            rounded_win_rate = round(win_rate, 1)
+            collection.update_one(
+                    {"name": user["name"], "tag": user["tag"]},
+                    {"$set": {"games": total_games, "elo": elo, "win_rate": rounded_win_rate}}
+                )
+        
         
 async def get_rank_info(region, puuid, riot_token):
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
@@ -117,7 +265,7 @@ async def get_last_game_companion(name, tagLine, mass_region, riot_token):
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match = await client.get_tft_match_v1_match_ids_by_puuid(region = mass_region, puuid=puuid, queries= {"start": 0, "count": 1}) # Grabbing last match 
-            match_info = await client.get_tft_match_v1_match(region =mass_region, id = match[0])
+            match_info = await client.get_tft_match_v1_match(region = mass_region, id = match[0])
         for participant in match_info['info']['participants']:
             if participant['puuid'] == puuid:
                 return participant['companion']['content_ID']
