@@ -551,12 +551,17 @@ def check_data_name_tag(name, tag, collection):
     user_data = collection.find_one(query) # Query the database
 
     if user_data:
-        mass_region = user_data.get('mass_region')
+        # If user is linked, return stored data
+        gameName = user_data.get('name')
+        tagLine = user_data.get('tag')
         region = user_data.get('region')
+        mass_region = user_data.get('mass_region')
         puuid = user_data.get('puuid')
         discord = user_data.get("discord_id")
-        return True, mass_region, region, puuid, discord
-    return False, None, None, None, None
+        # Indicates that user has linked data
+        return True, gameName, tagLine, region, mass_region, puuid, discord
+    return False, None, None, None, None, None, None
+
 
 # Command to get trait icon with texture 
 def trait_image(trait_name: str, style: int, trait_icon_mapping):

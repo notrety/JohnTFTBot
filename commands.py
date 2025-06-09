@@ -38,10 +38,10 @@ class BotCommands(commands.Cog):
     async def stats(self, ctx, *args):
         data = False
         if len(args) == 2:  # Expecting name and tagline
-            gameName = args[0]
-            tagLine = args[1]
-            linked, _, region, puuid = helpers.check_data_name_tag(gameName, tagLine, self.collection)
-            if not linked: # assume na player
+            search_gameName = args[0]
+            search_tagLine = args[1]
+            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data_name_tag(search_gameName, search_tagLine, self.collection)
+            if not data: # assume na player
                 region = "na1"
                 puuid = await helpers.get_puuid(gameName, tagLine, "americas", self.riot_token)
             data = True
@@ -49,11 +49,11 @@ class BotCommands(commands.Cog):
             mentioned_user = args[0]
             user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
             # Check if user is linked
-            data, gameName, tagLine, region, _, puuid, discord = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data(user_id, self.collection)
             if not data:
                 await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
         elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, _, puuid, discord = helpers.check_data(ctx.author.id, self.collection)
+            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
             if not data:
                 await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
         else: 
@@ -606,9 +606,9 @@ You can also add a number as the first argument to specify how many matches to i
         # Account must be linked for this command
         data = False
         if len(args) == 2:  # Expecting name and tagline
-            gameName = args[0].replace("_", " ")
-            tagLine = args[1]
-            data, mass_region, region, puuid = helpers.check_data_name_tag(gameName, tagLine, self.collection) # Check if name and tag are in database
+            search_gameName = args[0]
+            search_tagLine = args[1]
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data_name_tag(search_gameName, search_tagLine, self.collection) # Check if name and tag are in database
             if not data:
                 await ctx.send(f"{gameName}#{tagLine} has not linked their name and tagline.")
         elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
