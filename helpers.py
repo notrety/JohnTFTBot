@@ -546,8 +546,7 @@ def check_data(id, collection):
 
 # Function to check if user is linked based on name and tag
 def check_data_name_tag(name, tag, collection):
-    name_with_spaces = name.replace("_", " ")
-    query = {"name": name_with_spaces, "tag": tag} 
+    query = {"name": name, "tag": tag} 
     user_data = collection.find_one(query) # Query the database
 
     if user_data:
@@ -560,7 +559,7 @@ def check_data_name_tag(name, tag, collection):
         discord = user_data.get("discord_id")
         # Indicates that user has linked data
         return True, gameName, tagLine, region, mass_region, puuid, discord
-    return False, None, None, None, None, None, None
+    return False, name, tag, None, None, None, None
 
 
 # Command to get trait icon with texture 

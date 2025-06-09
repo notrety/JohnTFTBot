@@ -38,9 +38,9 @@ class BotCommands(commands.Cog):
     async def stats(self, ctx, *args):
         data = False
         if len(args) == 2:  # Expecting name and tagline
-            search_gameName = args[0]
-            search_tagLine = args[1]
-            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data_name_tag(search_gameName, search_tagLine, self.collection)
+            gameName = args[0].replace("_", " ")
+            tagLine = args[1]
+            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data_name_tag(gameName, tagLine, self.collection)
             if not data: # assume na player
                 region = "na1"
                 puuid = await helpers.get_puuid(gameName, tagLine, "americas", self.riot_token)
@@ -606,9 +606,9 @@ You can also add a number as the first argument to specify how many matches to i
         # Account must be linked for this command
         data = False
         if len(args) == 2:  # Expecting name and tagline
-            search_gameName = args[0]
-            search_tagLine = args[1]
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data_name_tag(search_gameName, search_tagLine, self.collection) # Check if name and tag are in database
+            gameName = args[0].replace("_", " ")
+            tagLine = args[1]
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data_name_tag(gameName, tagLine, self.collection) # Check if name and tag are in database
             if not data:
                 await ctx.send(f"{gameName}#{tagLine} has not linked their name and tagline.")
         elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
