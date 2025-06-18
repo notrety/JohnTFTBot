@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 
+# Ignore image cache
+image_cache/
+
+
 # Ignore virtual environment
 venv/
 env/

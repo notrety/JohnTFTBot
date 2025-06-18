@@ -4,7 +4,6 @@ import helpers
 import dicts
 import asyncio
 import random
-import time
 import os
 import matplotlib.pyplot as plt
 from collections import Counter
@@ -14,6 +13,10 @@ from PIL import Image
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 from pulsefire.taskgroups import TaskGroup
+import hashlib
+
+CACHE_DIR = "image_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
@@ -161,10 +164,28 @@ You can also add a number as the first argument to specify which match you are l
         
         #Fetches an image from a URL and resizes it if a size is provided.
         async def fetch_image(url: str, size: tuple = None):
-            
-            response = await asyncio.to_thread(requests.get, url)
-            image = Image.open(BytesIO(response.content)).convert("RGBA")
+            # Generate a unique filename from the URL
+            url_hash = hashlib.sha256(url.encode()).hexdigest()
+            ext = os.path.splitext(url)[1].split("?")[0] or ".png"
+            cache_path = os.path.join(CACHE_DIR, f"{url_hash}{ext}")
 
+            # Try loading from cache
+            if os.path.exists(cache_path):
+                image = Image.open(cache_path).convert("RGBA")
+                if size:
+                    image = image.resize(size, Image.LANCZOS)
+                return image
+
+            # Otherwise, download the image in a thread
+            response = await asyncio.to_thread(requests.get, url)
+            if response.status_code != 200:
+                raise Exception(f"Failed to fetch image from {url} (status {response.status_code})")
+
+            # Save to cache
+            with open(cache_path, "wb") as f:
+                f.write(response.content)
+
+            image = Image.open(BytesIO(response.content)).convert("RGBA")
             if size:
                 image = image.resize(size, Image.LANCZOS)
 
