@@ -188,10 +188,11 @@ async def get_rank_info(region, puuid, riot_token):
 async def get_cutoff(riot_token, region):
     # grab all players who are challenger, grandmaster, and master
     async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
-        challengers = await client.get_tft_league_v1_challenger_league(region=region)
-        grandmasters = await client.get_tft_league_v1_grandmaster_league(region=region)        
-        masters = await client.get_tft_league_v1_master_league(region=region)
-
+        challengers, grandmasters, masters = await asyncio.gather(
+            client.get_tft_league_v1_challenger_league(region=region),
+            client.get_tft_league_v1_grandmaster_league(region=region),
+            client.get_tft_league_v1_master_league(region=region),
+        )
 
         # put all the lps into a list
         lps = [entry.get('leaguePoints') for entry in challengers['entries']]

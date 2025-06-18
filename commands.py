@@ -297,12 +297,57 @@ You can also add a number as the first argument to specify which match you are l
             embed = discord.Embed(title=f"{gameName}#{tagLine} - Placement {index + 1}/{len(puuid_list)}", description=text)
             embed.set_image(url="attachment://player_board.png")
 
-            return embed, file
+            return embed, file, final_combined_image
 
-        Select_options = [
-            discord.SelectOption(label=f"{index + 1} - {participant.get('riotIdGameName')}#{participant.get('riotIdTagline')}", value=index)
-            for index, participant in enumerate(participants_sorted)
-        ]
+        async def generate_multiple_boards(start, end):
+            # Step 1: Generate boards concurrently
+            board_tasks = [generate_board(i) for i in range(start, end)]
+            board_results = await asyncio.gather(*board_tasks)  # [(embed, file, image), ...]
+
+            # Modify generate_board to return final_combined_image too:
+            # return embed, file, final_combined_image
+
+            embeds, files, board_images = zip(*board_results)  # unpack into three tuples
+
+            # Step 2: Create one tall image by stacking boards vertically
+            padding = 10  # height of the white bar
+            board_width = max(img.width for img in board_images)
+            total_height = sum(img.height for img in board_images) + padding * (len(board_images) - 1)
+
+            combined_image = Image.new("RGBA", (board_width, total_height), (255, 255, 255, 0))
+
+            current_y = 0
+            for i, img in enumerate(board_images):
+                combined_image.paste(img, (0, current_y), img)
+                current_y += img.height
+
+                if i < len(board_images) - 1:
+                    # Draw a white rectangle (bar) below this board
+                    white_bar = Image.new("RGBA", (board_width, padding), (255, 255, 255, 255))
+                    combined_image.paste(white_bar, (0, current_y))
+                    current_y += padding
+
+            # Step 3: Save the final stacked image
+            combined_image.save("all_boards_vertical.png")
+            final_file = discord.File("all_boards_vertical.png", filename="all_boards_vertical.png")
+
+            # Optional: You can still send individual embeds if you want, or just the final one
+            if start == 0:
+                embed_title = "Top 4 Boards"
+            else: 
+                embed_title = "Bot 4 Boards"
+
+            final_embed = discord.Embed(title=embed_title)
+            final_embed.set_image(url="attachment://all_boards_vertical.png")
+
+            return final_embed, final_file
+
+        Select_options =[
+            discord.SelectOption(label=f"Top 4 Boards", value=0),
+            discord.SelectOption(label=f"Bot 4 Boards", value=1)
+        ] + [
+            discord.SelectOption(label=f"{index + 1} - {participant.get('riotIdGameName')}#{participant.get('riotIdTagline')}", value=index+2) for index, participant in enumerate(participants_sorted)
+        ] 
 
         # --- Dropdown View ---
         class PlayerSwitchView(View):
@@ -318,14 +363,23 @@ You can also add a number as the first argument to specify which match you are l
                     return
                 await interaction.response.defer()  # Avoid timeout
                 new_index = int(interaction.data['values'][0])
-                new_embed, new_file = await generate_board(new_index)
-
+                if new_index in (0, 1):
+                    start = 0 if new_index == 0 else 4
+                    end = start + 4
+                    new_embed, new_file = await generate_multiple_boards(start, end)
+                else:
+                    new_embed, new_file, _ = await generate_board(new_index - 2)
+                
                 # Update the message with new data
-                await interaction.followup.edit_message(interaction.message.id, embed=new_embed, view=PlayerSwitchView(new_index, self.author_id))
-                await interaction.message.edit(attachments=[new_file])  # Reattach the file separately
+                await interaction.followup.edit_message(
+                    message_id=interaction.message.id,
+                    embed=new_embed,
+                    attachments=[new_file],
+                    view=PlayerSwitchView(new_index, self.author_id)
+                )
 
         # --- Send Initial Message ---
-        embed, file = await generate_board(current_index)
+        embed, file, _ = await generate_board(current_index)
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
         os.remove("player_board.png")
 
