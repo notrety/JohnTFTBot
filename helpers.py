@@ -341,134 +341,101 @@ async def get_rank_embed(name, tagLine, region, riot_token, puuid):
             
     return None, f"{gameName}#{tagLine} is unranked."
 
+def round_elo_to_rank(avg_elo):
+    if avg_elo > 2800:
+        return "Master+", int(round(avg_elo - 2800))
+    rounded_elo = (avg_elo // 100) * 100
+    rank = next((key for key, val in dicts.rank_to_elo.items() if val == rounded_elo), None)
+    return rank, 0
+
 # Function to grab previous match data
 async def last_match(gameName, tagLine, mode, mass_region, riot_token, region, game_num):
-
     puuid = await get_puuid(gameName, tagLine, mass_region, riot_token)
     if not puuid:
-        print(f"Could not find PUUID for {gameName}#{tagLine}.")
         return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
 
+    if not (1 <= game_num <= 20):
+        return f"Please enter a number between 1 and 20.", None, None, 0, None
+
     try:
-        # Fetch the latest 20 matches
         async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
             match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+            if not match_list:
+                return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
 
-        if not match_list:
-            print(f"No matches found for {gameName}#{tagLine}.")
-            return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
-        if game_num > 20 or game_num < 0:
-            print(f"Please enter a number between 1 and 20.")
-            return f"Please enter a number between 1 and 20.", None, None, 0, None
-        elif game_num > len(match_list) and game_num <= 20:
-            print(f"Not enough {mode} matches found for {gameName}#{tagLine}.")
-            return f"Not enough {mode} matches found for {gameName}#{tagLine}.", None, None, 0, None
+            target_queue = dicts.game_type_to_id[mode]
+            match_id = None
 
-        match_id = None
-        match_found = False
-        for index, match in enumerate(match_list):
-            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            for match in match_list:
                 match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
-            if mode == "GameMode":
-                if match_info['info']['queue_id'] > dicts.game_type_to_id[mode]:
-                    if game_num > 1:
-                        game_num -= 1
-                    else:
-                        match_id = match_list[index]  # Get the latest match ID
-                        match_found = True
+                queue_id = match_info['info']['queue_id']
+                if (mode == "GameMode" and queue_id > target_queue) or (mode != "GameMode" and queue_id == target_queue):
+                    game_num -= 1
+                    if game_num == 0:
+                        match_id = match
                         break
-            else:
-                if match_info['info']['queue_id'] == dicts.game_type_to_id[mode]:
-                    if game_num > 1:
-                        game_num -= 1
-                    else:
-                        match_id = match_list[index]  # Get the latest match ID
-                        match_found = True
-                        break
-        if not match_found:
-            mode = mode.lower()
-            print(f"No recent {mode} matches found for {gameName}#{tagLine}.")
-            return f"No recent {mode} matches found for {gameName}#{tagLine}.", None, None, 0, None
 
-        # Fetch match details
-        async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
+            if not match_id:
+                return f"No recent {mode.lower()} matches found for {gameName}#{tagLine}.", None, None, 0, None
+
             match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+            participants = match_info['info']['participants']
+            timestamp = match_info['info']['game_datetime'] / 1000
+            formatted_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            time_and_time_ago = formatted_time + ", " + time_ago(timestamp)
 
-        players_data = []
-        player_elos = 0
+            riot_ids_tasks = [client.get_account_v1_by_puuid(region=mass_region, puuid=p['puuid']) for p in participants]
+            rank_info_tasks = [get_rank_info(region, p['puuid'], riot_token) for p in participants]
+            riot_ids, ranks = await asyncio.gather(asyncio.gather(*riot_ids_tasks), asyncio.gather(*rank_info_tasks))
 
-        # Get timestamp to include in response
-        timestamp = match_info['info']['game_datetime'] / 1000 # unix timestamp, divide by 1000 because its in milliseconds
-        time = datetime.fromtimestamp(timestamp) # convert to time object
-        formatted_time = time.strftime('%Y-%m-%d %H:%M:%S') # format nicely
-        time_passed = time_ago(timestamp)
-        time_and_time_ago = formatted_time + ", " + time_passed
-        ranked_players = 8
-        # Find player stats
-        for participant in match_info['info']['participants']:
-            player_puuid = participant['puuid']
-            placement = participant['placement']
-            rank_icon = None
+            players_data = []
+            player_elos = 0
+            ranked_players = 8
 
-            # Check elos of all players to calculate average
-            rank_info = await get_rank_info(region, player_puuid, riot_token)
-            tier_and_rank = ""
-            for entry in rank_info:
-                if entry['queueType'] == 'RANKED_TFT':
-                    tier = entry['tier']
-                    rank = entry['rank']
-                    tier_and_rank = tier + " " + rank
-                    lp = entry['leaguePoints']
-            
-            if not tier_and_rank == "":
-                player_elos += dicts.rank_to_elo[tier_and_rank]
-                player_elos += int(lp)
-                rank_icon = dicts.tier_to_rank_icon[tier]
-            else: 
-                ranked_players-=1
-                rank_icon = dicts.tier_to_rank_icon["UNRANKED"]
+            for i, participant in enumerate(participants):
+                placement = participant['placement']
+                player_puuid = participant['puuid']
+                riot_id = riot_ids[i]
+                rank_info = ranks[i]
 
-            # Fetch gameName and tagLine from PUUID
-            async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
-                riot_id_info = await client.get_account_v1_by_puuid(region=mass_region, puuid=player_puuid)
+                name = f"{riot_id.get('gameName', 'Unknown')}#{riot_id.get('tagLine', '')}" if 'gameName' in riot_id else "Unknown Player"
+                tier_and_rank = ""
+                lp = 0
 
-            if 'gameName' in riot_id_info and 'tagLine' in riot_id_info:
-                player_name = f"{riot_id_info['gameName']}#{riot_id_info['tagLine']}"
-            else:
-                player_name = "Unknown Player"
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_TFT':
+                        tier = entry['tier']
+                        rank = entry['rank']
+                        tier_and_rank = f"{tier} {rank}"
+                        lp = entry['leaguePoints']
+                        break
 
-            # Store placement & name
-            players_data.append((placement, player_name, rank_icon))
+                if tier_and_rank:
+                    player_elos += dicts.rank_to_elo.get(tier_and_rank, 0) + lp
+                    rank_icon = dicts.tier_to_rank_icon.get(tier, dicts.tier_to_rank_icon["UNRANKED"])
+                else:
+                    ranked_players -= 1
+                    rank_icon = dicts.tier_to_rank_icon["UNRANKED"]
 
-        # Sort players by placement
-        players_data.sort()
-        # Calculate average lobby elo
-        avg_elo = player_elos / ranked_players
-        rounded_elo = (avg_elo // 100) * 100  # Round down to the nearest 100, avg elo of 99 should still say iron iv, etc
-        master_plus_lp = 0 
-        avg_rank = ""
-        # Find all keys greater than value
-        if avg_elo > 2800:
-            #master+ lobby, return average lp instead
-            avg_rank = "Master+"
-            master_plus_lp = int(round(avg_elo - 2800))
-        else:
-            avg_rank = next((key for key, val in dicts.rank_to_elo.items() if val == rounded_elo), None)
-        # Format the message
-        result = ""
-        for placement, name, icon in players_data:
-            full_name = gameName + "#" + tagLine
-            if custom_equal(full_name, name, "_ "):
-                result += f"{icon} **{placement}** - **__{name}__**\n"
-            else:
-                result += f"{icon} **{placement}** - {name}\n"
+                players_data.append((placement, name, rank_icon))
 
-        return result, match_id, avg_rank, master_plus_lp, time_and_time_ago
-    
+            players_data.sort()
+            avg_elo = player_elos / ranked_players if ranked_players else 0
+            avg_rank, master_lp = round_elo_to_rank(avg_elo)
+
+            result = ""
+            full_name = f"{gameName}#{tagLine}"
+            for placement, name, icon in players_data:
+                if custom_equal(full_name, name, "_ "):
+                    result += f"{icon} **{placement}** - **__{name}__**\n"
+                else:
+                    result += f"{icon} **{placement}** - {name}\n"
+
+            return result, match_id, avg_rank, master_lp, time_and_time_ago
+
     except Exception as err:
-        print(f"Error fetching last match for {gameName}#{tagLine}: {err}")
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
-
+    
 # Get recent x matches
 async def recent_matches(gameName, tagLine, puuid, mode, mass_region, riot_token, num_matches):
     try:
