@@ -1,5 +1,5 @@
 # File containing all helper functions for commands
-
+import aiohttp
 import asyncio
 from collections import Counter
 import discord
@@ -177,12 +177,20 @@ async def daily_store_stats(collection, riot_token):
                     {"$set": {"games": total_games, "elo": elo, "win_rate": rounded_win_rate, "average_placement": rounded_avp}}
                 )
         
-        
+
+# Update after pulsefire adds endpoint for league_v1_by_puuid
 async def get_rank_info(region, puuid, riot_token):
-    async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
-        summoner = await client.get_tft_summoner_v1_by_puuid(region=region, puuid=puuid)
-        rank_info = await client.get_tft_league_v1_entries_by_summoner(region=region, summoner_id=summoner["id"])
-    return rank_info
+    url = f"https://{region}.api.riotgames.com/tft/league/v1/by-puuid/{puuid}"
+    headers = {"X-Riot-Token": riot_token}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                print(response.json())
+                return await response.json()
+            else:
+                print(f"Error fetching rank info: {response.status}")
+                return None
 
 # Function to return cutoff lp for challenger and grandmaster
 async def get_cutoff(riot_token, region):
