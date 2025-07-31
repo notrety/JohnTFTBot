@@ -22,7 +22,7 @@ async def process_player(player_doc, collection, mass_region, riot_token):
     mass_region = player_doc["mass_region"]
     name = player_doc["name"]
     try:
-        match_ids = await get_all_current_set_match_ids(puuid, riot_token, mass_region, target_set=14)
+        match_ids = await get_all_current_set_match_ids(puuid, riot_token, mass_region, target_set=15)
         print(f"match ids obtained for {name}")
     except Exception as e:
         print(f"Error fetching match IDs for {puuid}: {e}")
@@ -186,7 +186,7 @@ async def get_rank_info(region, puuid, riot_token):
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
-                print(response.json())
+                await print(response.json())
                 return await response.json()
             else:
                 print(f"Error fetching rank info: {response.status}")
@@ -225,16 +225,7 @@ def get_trait_icon(traits_data, traitName):
 
 # Function to get the champ icon path
 def get_champ_icon(champs_data, characterName):
-    # temp patch for nitro, remove after set 14
-    if characterName == "TFT14_SummonLevel4":
-        return "assets/characters/tft14_summonlevel4/hud/tft14_summonlevel4_square.tft_set14"
-    
-    if characterName == "TFT14_SummonLevel2":
-        return "assets/characters/tft14_summonlevel2/hud/tft14_summonlevel2_square.tft_set14"
-    
-    if characterName == "TFT14_Summon_Turret":
-        return "assets/characters/tft14_summon_turret/hud/tft14_summon_turret_square.tft_set14"
-    
+
     # Loop through each champion in the list
     for champion in champs_data:        
         # Check if the apiName matches the provided characterName
@@ -341,7 +332,7 @@ async def get_rank_embed(name, tagLine, region, riot_token, puuid):
                 embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
                 embed.set_author(
                     name=f"TFT Stats for {gameName}#{tagLine}",
-                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
+                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set15",
                     icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
                 )
 
