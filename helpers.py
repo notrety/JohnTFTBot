@@ -186,7 +186,6 @@ async def get_rank_info(region, puuid, riot_token):
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
-                await print(response.json())
                 return await response.json()
             else:
                 print(f"Error fetching rank info: {response.status}")
