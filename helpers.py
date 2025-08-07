@@ -107,6 +107,14 @@ async def get_all_current_set_match_ids(puuid, riot_token, mass_region):
     print(match_ids)
     return match_ids
 
+async def reset_database(collection):
+    all_users = collection.find()
+    for user in all_users:
+        collection.update_one(
+                    {"name": user["name"], "tag": user["tag"]},
+                    {"$set": {"games": 0, "elo": None, "win_rate": None, "average_placement": None, "placement_counts": None}}
+                )
+
 
 async def daily_store_stats(collection, riot_token):
     all_users = collection.find()
@@ -124,7 +132,7 @@ async def daily_store_stats(collection, riot_token):
                 total_games = entry['wins'] + entry['losses']
                 elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
         today_games = total_games - games
-        if today_games != 0:
+        if today_games >= 0:
             async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
                 match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
                         

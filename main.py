@@ -143,5 +143,8 @@ async def on_command(ctx):
 # Only uncomment to manually run function to get all set placements (WORK IN PROGRESS, NOT FULLY WORKING YET)
 # asyncio.run(helpers.get_all_set_placements(collection, region, riot_token))
 
+# Only uncomment to fully reset database, do at start of set
+# asyncio.run(helpers.reset_database(collection))
+
 # Run the bot with your token
 bot.run(bot_token)
