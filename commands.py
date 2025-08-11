@@ -71,7 +71,6 @@ class BotCommands(commands.Cog):
             else:
                 await ctx.send(embed=rank_embed)
 
-
     # Command to fetch last match data
     @commands.command(name="recent", aliases=["rs","r","rr","rn","rh","rd","rg"])
     async def recent(self, ctx, *args):
@@ -721,7 +720,7 @@ You can also add a number as the first argument to specify how many matches to i
                 text = f"ERROR: If you linked your account in the past day, this command will not work as we need to store the data from the previous day."
             if text == "":
                 db_games = db_user_data['games']
-                db_elo = int(db_user_data['elo'])
+                db_elo = db_user_data['elo']
                 for entry in rank_info:
                     if entry['queueType'] == 'RANKED_TFT':
                         tier = entry['tier']
@@ -743,6 +742,8 @@ You can also add a number as the first argument to specify how many matches to i
 
                     await ctx.send(embed=embed)
                     return
+                if db_elo == None:
+                    db_elo = 0
                 elo_diff = elo - db_elo
                 lp_diff = ""
                 lp_diff_emoji = ""

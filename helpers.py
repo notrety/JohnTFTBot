@@ -112,7 +112,22 @@ async def reset_database(collection):
     for user in all_users:
         collection.update_one(
                     {"name": user["name"], "tag": user["tag"]},
-                    {"$set": {"games": 0, "elo": None, "win_rate": None, "average_placement": None, "placement_counts": None}}
+                    {"$set": {
+                        "games": 0, 
+                        "elo": None, 
+                        "win_rate": None, 
+                        "average_placement": None, 
+                        "placement_counts": {
+                            "1": 0,
+                            "2": 0,
+                            "3": 0,
+                            "4": 0,
+                            "5": 0,
+                            "6": 0,
+                            "7": 0,
+                            "8": 0
+                            }
+                    }}
                 )
 
 
@@ -127,17 +142,23 @@ async def daily_store_stats(collection, riot_token):
         mass_region = user.get('mass_region')
         placement_counts = user.get('placement_counts')
         rank_info = await get_rank_info(region, puuid, riot_token)
-        for entry in rank_info:
-            if entry['queueType'] == 'RANKED_TFT':
-                total_games = entry['wins'] + entry['losses']
-                elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
-        today_games = total_games - games
+        print(rank_info)
+        if not rank_info:
+            today_games = 0
+        else: 
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    total_games = entry['wins'] + entry['losses']
+                    elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+            today_games = total_games - games
         if today_games >= 0:
+            print("Updating  " + name)
             async with RiotAPIClient(default_headers={"X-Riot-Token": riot_token}) as client:
                 match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
                         
                 if not match_list:
-                    return f"No matches found for {name}#{tag}."
+                    print(f"No matches found for {name}#{tag}.")
+                    continue
                 
                 placements = []
                 num_matches = today_games
@@ -158,7 +179,8 @@ async def daily_store_stats(collection, riot_token):
                                 placements.append(participant['placement'])
                                 break
             if not placements:
-                return f"No ranked placements found for {name}#{tag}."
+                print(f"No ranked placements found for {name}#{tag}.")
+                continue
             # Build the $inc update dictionary
             counts = Counter(placements)
             update = {
@@ -171,8 +193,9 @@ async def daily_store_stats(collection, riot_token):
                 {"puuid": puuid},  # Find the player
                 {"$inc": update}   # Increment only the placements that occurred today
             )
-
-            wins = user.get("placement_counts")["1"]
+            updated_user = collection.find_one({"puuid": puuid})
+            placement_counts = updated_user.get("placement_counts", {str(i): 0 for i in range(1, 9)})
+            wins = placement_counts.get("1", 0)
             win_rate = 100 * wins / total_games
             rounded_win_rate = round(win_rate, 1)
             average_placement = (
@@ -194,7 +217,11 @@ async def get_rank_info(region, puuid, riot_token):
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
-                return await response.json()
+                try:
+                    return await response.json()
+                except Exception as e:
+                    print(f"JSON decode error: {e}")
+                    return None
             else:
                 print(f"Error fetching rank info: {response.status}")
                 return None
