@@ -243,7 +243,16 @@ async def get_cutoff(riot_token, region):
 
         # sort lps 
         lps_sorted = sorted(lps, reverse=True)
-
+        
+        # in the case there are less than 250 masters+ players
+        if len(lps_sorted) < 250:
+            return 500, 200
+        
+        # in the case there are between 250 and 750 masters+ players
+        if len(lps_sorted) < 750:
+            challenger_cutoff = max(500,lps_sorted[249])
+            return challenger_cutoff, 200
+        
         # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
         challenger_cutoff = max(500,lps_sorted[249])
         grandmaster_cutoff = max(200,lps_sorted[749])
@@ -259,7 +268,6 @@ def get_trait_icon(traits_data, traitName):
 
 # Function to get the champ icon path
 def get_champ_icon(champs_data, characterName):
-
     # Loop through each champion in the list
     for champion in champs_data:        
         # Check if the apiName matches the provided characterName
@@ -734,3 +742,41 @@ async def is_user_in_guild(guild: discord.Guild, user_id: int) -> bool:
     except discord.HTTPException as e:
         print(f"HTTP error while fetching member: {e}")
         return False
+
+async def parse_args(ctx, args):
+    gameNum, gameName, tagLine, user_id = None, None, None, None
+    
+    if len(args) == 3: # <gameNum, username, tagline>
+        if args[0].isdigit():
+            gameNum = int(args[0])
+            gameName, tagLine = args[1], args[2]
+        else:
+            return None, None, None, None, "Format should be <game #, username, tagline>"
+        
+    elif len(args) == 2 and args[1].startswith("<@"): # <gameNum, @mention>
+        if args[0].isdigit():
+            gameNum = int(args[0])
+            user_id = args[1].strip("<@!>")
+        else:
+            return None, None, None, None, "Format should be <game #, @mention>"
+        
+    elif len(args) == 2: # <username, tagline>
+        gameName, tagLine = args[0], args[1]
+
+    elif len(args) == 1 and args[0].startswith("<@"): # <@mention>
+        user_id = args[0].strip("<@!>")
+
+    elif len(args) == 1 and args[0].isdigit(): # <gameNum>
+        gameNum = int(args[0])
+        user_id = ctx.author.id
+
+    elif len(args) == 0: # all defaults 
+        user_id = ctx.author.id
+
+    else:
+        return None, None, None, None, (
+            "Usage: `<matches?> <name> <tag>` | `<matches?> @mention` | "
+            "`<matches?>` (self) | no args (self)"
+        )
+
+    return gameNum, gameName, tagLine, user_id, None

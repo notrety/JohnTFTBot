@@ -6,6 +6,7 @@ import asyncio
 import random
 import os
 import matplotlib.pyplot as plt
+from aiolimiter import AsyncLimiter
 from collections import Counter
 from discord.ui import View
 from discord.ext import commands
@@ -39,37 +40,24 @@ class BotCommands(commands.Cog):
     # Command to fetch TFT stats
     @commands.command(name="stats", aliases=["stast", "s", "tft"])
     async def stats(self, ctx, *args):
-        data = False
-        if len(args) == 2:  # Expecting name and tagline
-            gameName = args[0].replace("_", " ")
-            tagLine = args[1]
-            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data_name_tag(gameName, tagLine, self.collection)
-            if not data: # assume na player
-                region = "na1"
-                puuid = await helpers.get_puuid(gameName, tagLine, "americas", self.riot_token)
-            data = True
-        elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-            mentioned_user = args[0]
-            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-            # Check if user is linked
-            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data(user_id, self.collection)
-            if not data:
-                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-        elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, _, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
-            if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
-        else: 
-            # User formatted command incorrectly, let them know
-            await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
+        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        
+        if user_id:
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        else:
+            region = self.region
+            mass_region = self.mass_region
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+            if not puuid:
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            
+        rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.riot_token, puuid)
 
-        if data:
-            rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.riot_token, puuid)
-
-            if error_message:
-                await ctx.send(error_message)
-            else:
-                await ctx.send(embed=rank_embed)
+        if error_message:
+            await ctx.send(error_message)
+        else:
+            await ctx.send(embed=rank_embed)
 
     # Command to fetch last match data
     @commands.command(name="recent", aliases=["rs","r","rr","rn","rh","rd","rg"])
@@ -84,60 +72,23 @@ class BotCommands(commands.Cog):
             game_type = "Double Up"
         else:
             game_type = "Ranked"
-        region = None
-        mass_region = None
-        puuid = None
-        match_index = 1
-        data = False
-        if len(args) == 3:  # Expecting match num, name and tagline
-            match_index = int(args[0])
-            gameName = args[1]
-            tagLine = args[2]
-            data = True
-        elif len(args) == 2 and args[1].startswith("<@"):  # Check if it's a mention
-            match_index = int(args[0])
-            mentioned_user = args[1]
-            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-            # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-            if not data:
-                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-        elif len(args) == 2:
-            gameName = args[0]
-            tagLine = args[1]
-            data = True
-        elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-            mentioned_user = args[0]
-            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-            # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-            if not data:
-                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-        elif len(args) == 1 and str.isnumeric(args[0]):
-            match_index = int(args[0])
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
-            if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
-        elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
-            if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
-        else: 
-            # User formatted command incorrectly, let them know
-            await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n
-You can also add a number as the first argument to specify which match you are looking for.""")
-        if not data:
-            return
+        
+        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        if not gameNum:
+            gameNum = 1
 
-        # Use NA1 and americas as default routing values if not found for user
-        if not mass_region:
-            mass_region = self.mass_region
-        if not region:
+        # pull user data if registered
+        if user_id:
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        else:
             region = self.region
-        if not puuid:
+            mass_region = self.mass_region
             puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
-        # Fetch match data asynchronously
-        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.riot_token, region, match_index)
+            if not puuid:
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+    
+        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.riot_token, region, gameNum)
 
         embed = discord.Embed(
             title=f"Recent {game_type} TFT Match Placements:",
@@ -463,11 +414,12 @@ You can also add a number as the first argument to specify which match you are l
         
         # Create a list to store all users' elo and name
         user_elo_and_name = []
+        rate_limiter = AsyncLimiter(20, 1)  # 20 per 1 second
+
         async def process_user(user):
             if server:
                 if not int(user['discord_id']) in members:
                     return
-
             name = user['name']
             tag = user['tag']
             region = user['region']
@@ -480,9 +432,10 @@ You can also add a number as the first argument to specify which match you are l
                 await ctx.send(f"Error processing {name}#{tag}: {e}")
 
         async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
-            async with TaskGroup(asyncio.Semaphore(20)) as tg:
+            async with TaskGroup() as tg:
                 for user in all_users:
-                    await tg.create_task(process_user(user))
+                    async with rate_limiter:
+                        await tg.create_task(process_user(user))
         
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
@@ -552,127 +505,85 @@ You can also add a number as the first argument to specify which match you are l
         else:
             game_type = "Ranked"
 
-        num_matches = 20
-        data = False
-        if len(args) == 3:  # Expecting matches to display, name and tagline
-            num_matches = int(args[0])
-            gameName = args[1]
-            tagLine = args[2]
-            data = True
-            region = None
-            mass_region = None
-            puuid = None
-        elif len(args) == 2 and args[1].startswith("<@"):  # Check if it's a mention
-            num_matches = int(args[0])
-            mentioned_user = args[1]
-            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-            # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-            if not data:
-                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-        elif len(args) == 2:
-            gameName = args[0]
-            tagLine = args[1]
-            data = True
-            region = None
-            mass_region = None
-            puuid = None
-        elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-            mentioned_user = args[0]
-            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-            # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-            if not data:
-                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-        elif len(args) == 1 and str.isnumeric(args[0]):
-            num_matches = int(args[0])
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
-            if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
-        elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
-            if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
-        else: 
-            # User formatted command incorrectly, let them know
-            await ctx.send("""Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.\n
-You can also add a number as the first argument to specify how many matches to include.""")
+        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        if not gameNum:
+            gameNum = 20
 
-        if data:
-            if not mass_region:
-                mass_region = self.mass_region
-            if not region:
-                region = self.region
+        # pull user data if registered
+        if user_id:
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        else:
+            mass_region = self.mass_region
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
             if not puuid:
-                puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
-                if not puuid:
-                    print(f"Could not find PUUID for {gameName}#{tagLine}.")
-                    return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
-            error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, puuid, game_type, mass_region, self.riot_token, num_matches)  # Unpack tuple
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+        
+        error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, puuid, game_type, mass_region, self.riot_token, gameNum)  # Unpack tuple
 
-            if error_message:
-                await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed
-            else:
-                top4s = 0
-                firsts = 0
-                total_placement = 0
-                text = ""
-                for idx, placement in enumerate(placements):
-                    if idx == 9:
-                        text += dicts.number_to_num_icon[placement] + "\n"
-                    else:
-                        text += dicts.number_to_num_icon[placement] + " "
-                    total_placement += placement
-                    if int(placement) <= 4:
-                        top4s += 1
-                        if int(placement) == 1:
-                            firsts += 1
-                avg_placement = round(total_placement / len(placements), 1)
-                text += f"\n\n:first_place: Firsts: {firsts}\n:dart: Top 4s: {top4s}\n:bar_chart: Average Placement: {avg_placement}"
+        if error_message:
+            await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed
+        else:
+            top4s = 0
+            firsts = 0
+            total_placement = 0
+            text = ""
+            for idx, placement in enumerate(placements):
+                if idx == 9:
+                    text += dicts.number_to_num_icon[placement] + "\n"
+                else:
+                    text += dicts.number_to_num_icon[placement] + " "
+                total_placement += placement
+                if int(placement) <= 4:
+                    top4s += 1
+                    if int(placement) == 1:
+                        firsts += 1
+            avg_placement = round(total_placement / len(placements), 1)
+            text += f"\n\n:first_place: Firsts: {firsts}\n:dart: Top 4s: {top4s}\n:bar_chart: Average Placement: {avg_placement}"
 
-                x_labels = list(range(1, 9)) # sets ticks 1 to 8 at every 1
-                counts = Counter(placements)
-                frequencies = [counts.get(num, 0) for num in x_labels]
-                max_frequency = max(frequencies)
-                num_ticks = max(5, max_frequency)  # Minimum 5 ticks
-                y_labels = list(range(1, num_ticks+1)) # Sets ticks = to higher freq or 5 
+            x_labels = list(range(1, 9)) # sets ticks 1 to 8 at every 1
+            counts = Counter(placements)
+            frequencies = [counts.get(num, 0) for num in x_labels]
+            max_frequency = max(frequencies)
+            num_ticks = max(5, max_frequency)  # Minimum 5 ticks
+            y_labels = list(range(1, num_ticks+1)) # Sets ticks = to higher freq or 5 
 
-                # Create the plot
-                fig, ax = plt.subplots()
-                bar_colors = ['#F0B52B', '#969696', '#A45F00', '#595988', '#596263', '#596263', '#596263', '#596263']
+            # Create the plot
+            fig, ax = plt.subplots()
+            bar_colors = ['#F0B52B', '#969696', '#A45F00', '#595988', '#596263', '#596263', '#596263', '#596263']
 
-                ax.bar(x_labels, frequencies, color=bar_colors)
-                # ax.set_xlabel('Placement', color = "white", fontsize=14)
-                ax.set_ylabel('Count', color = "white", fontsize=17)
-                # ax.set_title('Placement Frequency', color = "white")
-                ax.set_xticks(x_labels)
-                ax.set_yticks(y_labels)
-                [t.set_color('white') for t in ax.xaxis.get_ticklabels()]
-                [t.set_color('white') for t in ax.yaxis.get_ticklabels()]
-                ax.tick_params(axis='x', color = 'white', labelsize=16)
-                ax.tick_params(axis='y', color = 'white', labelsize=16)
+            ax.bar(x_labels, frequencies, color=bar_colors)
+            # ax.set_xlabel('Placement', color = "white", fontsize=14)
+            ax.set_ylabel('Count', color = "white", fontsize=17)
+            # ax.set_title('Placement Frequency', color = "white")
+            ax.set_xticks(x_labels)
+            ax.set_yticks(y_labels)
+            [t.set_color('white') for t in ax.xaxis.get_ticklabels()]
+            [t.set_color('white') for t in ax.yaxis.get_ticklabels()]
+            ax.tick_params(axis='x', color = 'white', labelsize=16)
+            ax.tick_params(axis='y', color = 'white', labelsize=16)
 
-                for spine in ax.spines.values():
-                    spine.set_edgecolor('white')
+            for spine in ax.spines.values():
+                spine.set_edgecolor('white')
 
-                filename = 'placements.png'
-                plt.tight_layout(pad=0.8)
-                plt.savefig(filename,transparent=True,dpi=300)
-                plt.close()
-                img = Image.open(filename)
-                img = img.resize((240, 180))  # Width, Height in pixels
-                img.save(filename)
-                embed = discord.Embed(
-                    title=f"Recent {real_num_matches} {game_type} Matches for {gameName}#{tagLine}",
-                    description=text,
-                    color=discord.Color.blue()
-                )
-                file = discord.File('placements.png', filename='placements.png')
-                embed.set_image(url="attachment://placements.png")
-                
-                await ctx.send(file=file, embed=embed)
+            filename = 'placements.png'
+            plt.tight_layout(pad=0.8)
+            plt.savefig(filename,transparent=True,dpi=300)
+            plt.close()
+            img = Image.open(filename)
+            img = img.resize((240, 180))  # Width, Height in pixels
+            img.save(filename)
+            embed = discord.Embed(
+                title=f"Recent {real_num_matches} {game_type} Matches for {gameName}#{tagLine}",
+                description=text,
+                color=discord.Color.blue()
+            )
+            file = discord.File('placements.png', filename='placements.png')
+            embed.set_image(url="attachment://placements.png")
+            
+            await ctx.send(file=file, embed=embed)
 
-                os.remove("placements.png")
+            os.remove("placements.png")
 
     # Command that summarizes todays games, only works for linked accounts
     @commands.command(name="today", aliases=["t"])
