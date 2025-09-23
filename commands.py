@@ -21,9 +21,10 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
-    def __init__(self, bot, riot_token, collection, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping):
+    def __init__(self, bot, tft_token, lol_token, collection, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping):
         self.bot = bot
-        self.riot_token = riot_token
+        self.tft_token = tft_token
+        self.lol_token = lol_token
         self.collection = collection
         self.region = region
         self.mass_region = mass_region
@@ -47,12 +48,32 @@ class BotCommands(commands.Cog):
         else:
             region = self.region
             mass_region = self.mass_region
-            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
             if not puuid:
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
             
-        rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.riot_token, puuid)
+        rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.tft_token, puuid)
+
+        if error_message:
+            await ctx.send(error_message)
+        else:
+            await ctx.send(embed=rank_embed)
+
+    # Command to fetch LOL stats
+    @commands.command(name="leaguestats", aliases=["lstats", "ls", "lol"])
+    async def leagueStats(self, ctx, *args):
+        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        if user_id:
+                data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        region = self.region
+        mass_region = self.mass_region
+        puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
+        if not puuid:
+            print(f"Could not find PUUID for {gameName}#{tagLine}.")
+            return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            
+        rank_embed, error_message = await helpers.get_lol_rank_embed(gameName, tagLine, region, self.lol_token, puuid)
 
         if error_message:
             await ctx.send(error_message)
@@ -83,12 +104,12 @@ class BotCommands(commands.Cog):
         else:
             region = self.region
             mass_region = self.mass_region
-            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
             if not puuid:
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
     
-        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.riot_token, region, gameNum)
+        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.tft_token, region, gameNum)
 
         embed = discord.Embed(
             title=f"Recent {game_type} TFT Match Placements:",
@@ -98,7 +119,7 @@ class BotCommands(commands.Cog):
         embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
         await ctx.send(embed=embed)
 
-        async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
+        async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
             match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
 
         participants = match_info['info']['participants']
@@ -349,7 +370,7 @@ class BotCommands(commands.Cog):
         # Check if the user already has linked data
         existing_user = self.collection.find_one({"discord_id": user_id})
         mass_region = dicts.region_to_mass[region.lower()]
-        puuid = await helpers.get_puuid(name, tag, mass_region, self.riot_token)
+        puuid = await helpers.get_puuid(name, tag, mass_region, self.tft_token)
         
         if existing_user:
             # If user already has data, update it
@@ -425,13 +446,13 @@ class BotCommands(commands.Cog):
             region = user['region']
             puuid = user['puuid']
             try:                
-                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.riot_token, region)
+                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.tft_token, region)
                 name_and_tag = f"{name}#{tag}"
                 user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, region))
             except Exception as e:
                 await ctx.send(f"Error processing {name}#{tag}: {e}")
 
-        async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
+        async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
             async with TaskGroup() as tg:
                 for user in all_users:
                     async with rate_limiter:
@@ -466,7 +487,7 @@ class BotCommands(commands.Cog):
     # Commnad to check the lp cutoff for challenger and grandmaster
     @commands.command(name="cutoff", aliases=["cutoffs", "challenger", "grandmaster", "grandmasters", "lpcutoff", "chall", "gm"])
     async def cutoff(self, ctx):
-        challenger_cutoff, grandmaster_cutoff = await helpers.get_cutoff(self.riot_token, self.region)
+        challenger_cutoff, grandmaster_cutoff = await helpers.get_cutoff(self.tft_token, self.region)
         cutoff_embed = discord.Embed(
             title=f"Cutoff LPs",
             description=f"<:RankChallenger:1336405530444431492> Challenger Cutoff: {challenger_cutoff}\n<:RankGrandmaster:1336405512887078923> Grandmaster Cutoff: {grandmaster_cutoff}",
@@ -514,12 +535,12 @@ class BotCommands(commands.Cog):
             data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
         else:
             mass_region = self.mass_region
-            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
             if not puuid:
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
         
-        error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, puuid, game_type, mass_region, self.riot_token, gameNum)  # Unpack tuple
+        error_message, placements, real_num_matches = await helpers.recent_matches(gameName, tagLine, puuid, game_type, mass_region, self.tft_token, gameNum)  # Unpack tuple
 
         if error_message:
             await ctx.send(embed=discord.Embed(description=error_message,color=discord.Color.blue()))  # Send error as embed
@@ -618,12 +639,12 @@ class BotCommands(commands.Cog):
             if not region:
                 region = self.region
             if not puuid:
-                puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.riot_token)
+                puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
 
             if not puuid:
                 text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
     
-            rank_info = await helpers.get_rank_info(region, puuid, self.riot_token)
+            rank_info = await helpers.get_rank_info(region, puuid, self.tft_token)
             db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
             if not db_user_data:
                 text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
@@ -665,7 +686,7 @@ class BotCommands(commands.Cog):
                     lp_diff = str(elo_diff)
                     lp_diff_emoji = "📉"
                 today_games = total_games - db_games
-                async with RiotAPIClient(default_headers={"X-Riot-Token": self.riot_token}) as client:
+                async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
                     match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
                     
                     if not match_list:
@@ -713,7 +734,7 @@ class BotCommands(commands.Cog):
                 url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
                 icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
             )
-            companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.riot_token)
+            companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.tft_token)
             companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
             companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
             embed.set_thumbnail(url=companion_url)
@@ -724,18 +745,18 @@ class BotCommands(commands.Cog):
     @commands.command(name="compare", aliases=["c"])
     async def compare(self, ctx, *args): 
         text = ""
-        data, error_message, p1_name, p1_tag, p1_region, p1_puuid, p2_name, p2_tag, p2_region, p2_puuid = await helpers.take_in_compare_args(args, self.collection, ctx.author.id, self.riot_token)
+        data, error_message, p1_name, p1_tag, p1_region, p1_puuid, p2_name, p2_tag, p2_region, p2_puuid = await helpers.take_in_compare_args(args, self.collection, ctx.author.id, self.tft_token)
         if data:
             p1_gameName = p1_name.replace("_", " ")
             p2_gameName = p2_name.replace("_", " ")
             failedFetch = False
             try:
-                p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.riot_token)
+                p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.tft_token)
             except Exception as err:
                 error_message = f"Error fetching rank info for {p1_gameName}#{p1_tag}: {err}. "
                 failedFetch = True
             try:
-                p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.riot_token)
+                p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.tft_token)
             except Exception as err:
                 error_message += f"Error fetching rank info for {p2_gameName}#{p2_tag}: {err}."
                 failedFetch = True
@@ -823,5 +844,5 @@ class BotCommands(commands.Cog):
 
 # Add this class as a cog to main
 async def setup(bot):
-    await bot.add_cog(BotCommands(bot, bot.riot_token, bot.collection, bot.region, 
+    await bot.add_cog(BotCommands(bot, bot.tft_token, bot.lol_token, bot.collection, bot.region, 
                                   bot.mass_region, bot.champ_mapping, bot.item_mapping,  bot.trait_icon_mapping, bot.companion_mapping))

@@ -28,7 +28,8 @@ except Exception as e:
 
 # Get the token
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
-riot_token = os.getenv("RIOT_API_TOKEN")
+tft_token = os.getenv("TFT_API_TOKEN")
+lol_token = os.getenv("LOL_API_TOKEN")
 
 # Setting json urls
 json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
@@ -87,7 +88,8 @@ mass_region = "americas"
 region = "na1"        
 
 bot.collection = collection
-bot.riot_token = riot_token
+bot.tft_token = tft_token
+bot.lol_token = lol_token
 bot.region = region
 bot.mass_region = mass_region
 bot.champ_mapping = champ_mapping
@@ -111,7 +113,7 @@ async def scheduler():
         wait_time = (target_time - now).total_seconds()
 
         await asyncio.sleep(wait_time)  # Wait until 1 AM EST
-        await helpers.daily_store_stats(collection, riot_token)  # Run the task
+        await helpers.daily_store_stats(collection, tft_token)  # Run the task
         print("Updated elo and games using scheduler. Time: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 # Show bot is online and invoke scheduled snapshot functionality
@@ -138,10 +140,10 @@ async def on_command(ctx):
     print(f"Command used: {ctx.command} at {timestamp}")
 
 # Only uncomment to manually run snapshot function
-# asyncio.run(helpers.daily_store_stats(collection, riot_token))
+# asyncio.run(helpers.daily_store_stats(collection, tft_token))
 
 # Only uncomment to manually run function to get all set placements (WORK IN PROGRESS, NOT FULLY WORKING YET)
-# asyncio.run(helpers.get_all_set_placements(collection, region, riot_token))
+# asyncio.run(helpers.get_all_set_placements(collection, region, tft_token))
 
 # Only uncomment to fully reset database, do at start of set
 # asyncio.run(helpers.reset_database(collection))
