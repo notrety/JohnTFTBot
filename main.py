@@ -34,7 +34,11 @@ lol_token = os.getenv("LOL_API_TOKEN")
 # Setting json urls
 json_url = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
 item_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/tftitems.json"
+lol_item_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/items.json"
 companion_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/companions.json"
+keystone_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/perks.json"
+runes_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/perkstyles.json"
+summoner_spell_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/summoner-spells.json"
 
 # Setting champion and trait mapping
 response = requests.get(json_url)
@@ -62,10 +66,40 @@ if response.status_code == 200:
 else:
     print("Failed to fetch data")
 
+# Setting item mapping based on item json
+response = requests.get(lol_item_json_url)
+if response.status_code == 200:
+    lol_item_mapping = response.json()  # Assuming data is a dictionary
+    print("Lol items parsed successfully")
+else:
+    print("Failed to fetch data")
+
+
 response = requests.get(companion_json_url)
 if response.status_code == 200:
     companion_mapping = response.json()  # Assuming data is a dictionary
     print("Companions parsed successfully")
+else:
+    print("Failed to fetch data")
+response = requests.get(keystone_json_url)
+if response.status_code == 200:
+    keystone_mapping = response.json()  # Assuming data is a dictionary
+    print("Keystones parsed successfully")
+else:
+    print("Failed to fetch data")
+
+response = requests.get(runes_json_url)
+if response.status_code == 200:
+    runes_data = response.json() 
+    runes_mapping = runes_data.get("styles", [])
+    print("Runes parsed successfully")
+else:
+    print("Failed to fetch data")
+
+response = requests.get(summoner_spell_json_url)
+if response.status_code == 200:
+    summoner_spell_mapping = response.json()  # Assuming data is a dictionary
+    print("Summoner spells parsed successfully")
 else:
     print("Failed to fetch data")
 
@@ -96,6 +130,10 @@ bot.champ_mapping = champ_mapping
 bot.item_mapping = item_mapping
 bot.trait_icon_mapping = trait_icon_mapping
 bot.companion_mapping = companion_mapping
+bot.lol_item_mapping = lol_item_mapping
+bot.keystone_mapping = keystone_mapping
+bot.runes_mapping = runes_mapping
+bot.summoner_spell_mapping = summoner_spell_mapping
 
 # Take a snapshot of games and LP for !today command
 async def scheduler():

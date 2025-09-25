@@ -354,6 +354,59 @@ class BotCommands(commands.Cog):
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
         os.remove("player_board.png")
 
+    # League recent command
+    @commands.command(name="recentleague", aliases=["rl","lr"])
+    async def recent_league(self, ctx, *args):
+        
+        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        if not gameNum:
+            gameNum = 1
+
+        if user_id:
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        
+        region = self.region
+        mass_region = self.mass_region
+        puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
+        if not puuid:
+            print(f"Could not find PUUID for {gameName}#{tagLine}.")
+            return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+
+        # use last_match league command
+        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, items, ward, killparticipation = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
+        
+        result = (
+            f"Remake: {remake}\n"
+            f"Player List: {player_list}\n"
+            f"Duration: {duration}\n"
+            f"Champion ID: {champ_id}\n"
+            f"CS: {cs}\n"
+            f"Level: {level}\n"
+            f"Kills: {kills}\n"
+            f"Deaths: {deaths}\n"
+            f"Assists: {assists}\n"
+            f"Gold: {gold}\n"
+            f"Win: {win}\n"
+            f"Keystone ID: {keystone_id}\n"
+            f"Rune ID: {rune_id}\n"
+            f"Items: {items}\n"
+            f"Ward: {ward}\n"
+            f"Kill Participation: {killparticipation}"
+        )
+
+
+        embed = discord.Embed(
+            title=f"Recent Ranked LOL Match Results:",
+            description=result,
+            color=discord.Color.blue()
+        )
+        if win == True:
+            embed.color = discord.Color.blue()
+        else:
+            embed.color = discord.Color.red()
+        embed.set_footer(text=f"This is a test output only showing raw data")
+        await ctx.send(embed=embed)
+
     # Redirect user to /link
     @commands.command()
     async def link(self, ctx):
