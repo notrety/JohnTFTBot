@@ -1,5 +1,4 @@
 import discord
-import requests
 import helpers
 import dicts
 import asyncio
@@ -11,17 +10,12 @@ from collections import Counter
 from discord.ui import View
 from discord.ext import commands
 from PIL import Image
-from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 from pulsefire.taskgroups import TaskGroup
-import hashlib
-
-CACHE_DIR = "image_cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
-    def __init__(self, bot, tft_token, lol_token, collection, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping):
+    def __init__(self, bot, tft_token, lol_token, collection, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping, lol_item_mapping, keystone_mapping, runes_mapping, summs_mapping):
         self.bot = bot
         self.tft_token = tft_token
         self.lol_token = lol_token
@@ -32,6 +26,10 @@ class BotCommands(commands.Cog):
         self.item_mapping = item_mapping
         self.trait_icon_mapping = trait_icon_mapping
         self.companion_mapping = companion_mapping
+        self.lol_item_mapping = lol_item_mapping
+        self.keystone_mapping = keystone_mapping
+        self.runes_mapping = runes_mapping
+        self.summs_mapping = summs_mapping
 
     # Basic test command
     @commands.command()
@@ -116,6 +114,7 @@ class BotCommands(commands.Cog):
             description=result,
             color=discord.Color.blue()
         )
+
         embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
         await ctx.send(embed=embed)
 
@@ -133,35 +132,6 @@ class BotCommands(commands.Cog):
         puuid_list = [p['puuid'] for p in participants_sorted]
         current_index = puuid_list.index(puuid)
         
-        #Fetches an image from a URL and resizes it if a size is provided.
-        async def fetch_image(url: str, size: tuple = None):
-            # Generate a unique filename from the URL
-            url_hash = hashlib.sha256(url.encode()).hexdigest()
-            ext = os.path.splitext(url)[1].split("?")[0] or ".png"
-            cache_path = os.path.join(CACHE_DIR, f"{url_hash}{ext}")
-
-            # Try loading from cache
-            if os.path.exists(cache_path):
-                image = Image.open(cache_path).convert("RGBA")
-                if size:
-                    image = image.resize(size, Image.LANCZOS)
-                return image
-
-            # Otherwise, download the image in a thread
-            response = await asyncio.to_thread(requests.get, url)
-            if response.status_code != 200:
-                raise Exception(f"Failed to fetch image from {url} (status {response.status_code})")
-
-            # Save to cache
-            with open(cache_path, "wb") as f:
-                f.write(response.content)
-
-            image = Image.open(BytesIO(response.content)).convert("RGBA")
-            if size:
-                image = image.resize(size, Image.LANCZOS)
-
-            return image
-
         async def generate_board(index):
             participant = participants_sorted[index]
 
@@ -201,8 +171,8 @@ class BotCommands(commands.Cog):
 
                 if champ_icon_path:
                     champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
-                    champ_task = fetch_image(champion_url, (64, 64))
-                    rarity_task = fetch_image(rarity_url, (72, 72))
+                    champ_task = helpers.fetch_image(champion_url, (64, 64))
+                    rarity_task = helpers.fetch_image(rarity_url, (72, 72))
                     
                     icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
 
@@ -233,12 +203,12 @@ class BotCommands(commands.Cog):
 
                 if unit["tier"] in {2, 3}:
                     tier_icon_path = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{unit['tier']}.png"
-                    tier_resized = await fetch_image(tier_icon_path, (72, 36))
+                    tier_resized = await helpers.fetch_image(tier_icon_path, (72, 36))
                     champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
 
                 item_urls = [f"https://raw.communitydragon.org/latest/game/{helpers.get_item_icon(self.item_mapping, item).lower()}" for item in unit["item_names"]]
 
-                fetch_tasks = [fetch_image(url, (23, 23)) for url in item_urls]
+                fetch_tasks = [helpers.fetch_image(url, (23, 23)) for url in item_urls]
                 item_icons = await asyncio.gather(*fetch_tasks)
 
                 for i, item_icon in enumerate(item_icons):
@@ -373,8 +343,30 @@ class BotCommands(commands.Cog):
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, items, ward, killparticipation = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
+        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, ward, killparticipation = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
         
+        champ_path = helpers.get_lol_champ_icon(champ_id)
+        keystone_path = helpers.get_keystone_icon(self.keystone_mapping, keystone_id).lower()
+        runes_path = helpers.get_rune_icon(self.runes_mapping, rune_id).lower()
+        summ1_path = helpers.get_summs_icon(self.summs_mapping, summ1_id).lower()
+        summ2_path = helpers.get_summs_icon(self.summs_mapping, summ2_id).lower()
+
+        tab_final = Image.new("RGBA", (600, 100), (0, 0, 0, 0))
+
+        champ_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (50,50))
+        keystone_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (25,25))
+        runes_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (25,25))
+        summ1_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (25,25))
+        summ2_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25))
+        
+        tab_final.paste(champ_image, (0,0))
+        tab_final.paste(keystone_image, (75,0))
+        tab_final.paste(runes_image,(75,25))
+        tab_final.paste(summ1_image,(50,0))
+        tab_final.paste(summ2_image,(50,25))
+    
+        tab_final.save("tab_example.png")
+        final_file = discord.File("tab_example.png", filename="tab_example.png")
         result = (
             f"Remake: {remake}\n"
             f"Player List: {player_list}\n"
@@ -394,18 +386,16 @@ class BotCommands(commands.Cog):
             f"Kill Participation: {killparticipation}"
         )
 
-
         embed = discord.Embed(
-            title=f"Recent Ranked LOL Match Results:",
+            title="Recent Ranked LOL Match Results:",
             description=result,
-            color=discord.Color.blue()
+            color=discord.Color.blue() if win else discord.Color.red()
         )
-        if win == True:
-            embed.color = discord.Color.blue()
-        else:
-            embed.color = discord.Color.red()
-        embed.set_footer(text=f"This is a test output only showing raw data")
-        await ctx.send(embed=embed)
+
+        embed.set_image(url="attachment://tab_example.png")
+        embed.set_footer(text="This is a test output only showing raw data")
+
+        await ctx.send(file=final_file, embed=embed)
 
     # Redirect user to /link
     @commands.command()
@@ -898,4 +888,4 @@ class BotCommands(commands.Cog):
 # Add this class as a cog to main
 async def setup(bot):
     await bot.add_cog(BotCommands(bot, bot.tft_token, bot.lol_token, bot.collection, bot.region, 
-                                  bot.mass_region, bot.champ_mapping, bot.item_mapping,  bot.trait_icon_mapping, bot.companion_mapping))
+                                  bot.mass_region, bot.champ_mapping, bot.item_mapping,  bot.trait_icon_mapping, bot.companion_mapping, bot.lol_item_mapping, bot.keystone_mapping, bot.runes_mapping, bot.summs_mapping))

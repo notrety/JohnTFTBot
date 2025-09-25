@@ -38,7 +38,7 @@ lol_item_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-g
 companion_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/companions.json"
 keystone_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/perks.json"
 runes_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/perkstyles.json"
-summoner_spell_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/summoner-spells.json"
+summs_json_url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/summoner-spells.json"
 
 # Setting champion and trait mapping
 response = requests.get(json_url)
@@ -96,9 +96,9 @@ if response.status_code == 200:
 else:
     print("Failed to fetch data")
 
-response = requests.get(summoner_spell_json_url)
+response = requests.get(summs_json_url)
 if response.status_code == 200:
-    summoner_spell_mapping = response.json()  # Assuming data is a dictionary
+    summs_mapping = response.json()  # Assuming data is a dictionary
     print("Summoner spells parsed successfully")
 else:
     print("Failed to fetch data")
@@ -133,7 +133,7 @@ bot.companion_mapping = companion_mapping
 bot.lol_item_mapping = lol_item_mapping
 bot.keystone_mapping = keystone_mapping
 bot.runes_mapping = runes_mapping
-bot.summoner_spell_mapping = summoner_spell_mapping
+bot.summs_mapping = summs_mapping
 
 # Take a snapshot of games and LP for !today command
 async def scheduler():

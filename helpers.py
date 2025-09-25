@@ -10,6 +10,11 @@ from datetime import datetime
 from PIL import Image
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
+import os
+import hashlib
+
+CACHE_DIR = "image_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 async def get_all_set_placements(collection, mass_region, tft_token):
     players = list(collection.find({}))
@@ -302,20 +307,20 @@ def get_item_icon(items_data, itemName):
     print(f"{itemName} Not Found")
     return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
 
-def get_lol_item_icon(lol_item_json, itemId):
-    if itemId == 0:
-        return "assets/items/icons2d/gp_ui_placeholder"
-    for item in lol_item_json:
-        if itemId == item.get("id"):
-            return item.get("iconPath", "")[:-4]
-    print(f"{itemId}Not Found")
-    return None
-
 def get_companion_icon(companions_json, contentId):
     for companion in companions_json:
         if contentId == companion.get("contentId"):
             return companion.get("loadoutsIcon")[21:]
     print(f"{contentId} Not Found")
+    return None
+
+def get_lol_item_icon(lol_item_json, itemId):
+    if itemId == 0:
+        return "assets/items/icons2d/gp_ui_placeholder"
+    for item in lol_item_json:
+        if itemId == item.get("id"):
+            return item.get("iconPath", "")[21:]
+    print(f"{itemId}Not Found")
     return None
 
 def get_lol_champ_icon(championId):
@@ -324,23 +329,53 @@ def get_lol_champ_icon(championId):
 def get_keystone_icon(keystones_json, style):
     for keystone in keystones_json:
         if style == keystone.get("id"):
-            return keystone.get("iconPath", "")[:-4]
+            return keystone.get("iconPath", "")[21:]
     print(f"{style} Not Found")
     return None
 
 def get_rune_icon(runes_json, style):
     for rune in runes_json:
         if style == rune.get("id"):
-            return rune.get("iconPath", "")[:-4]
+            return rune.get("iconPath", "")[21:]
     print(f"{style} Not Found")
     return None
 
 def get_summs_icon(summs_json, summonerId):
     for summ in summs_json:
         if summonerId == summ.get("id"):
-            return summ.get("iconPath", "")[:-4]
+            return summ.get("iconPath", "")[21:]
     print(f"{summ} Not Found")
     return None 
+
+async def fetch_image(url: str, size: tuple = None):
+
+    print("looking for " + url)
+    # Generate a unique filename from the URL
+    url_hash = hashlib.sha256(url.encode()).hexdigest()
+    ext = os.path.splitext(url)[1].split("?")[0] or ".png"
+    cache_path = os.path.join(CACHE_DIR, f"{url_hash}{ext}")
+
+    # Try loading from cache
+    if os.path.exists(cache_path):
+        image = Image.open(cache_path).convert("RGBA")
+        if size:
+            image = image.resize(size, Image.LANCZOS)
+        return image
+
+    # Otherwise, download the image in a thread
+    response = await asyncio.to_thread(requests.get, url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to fetch image from {url} (status {response.status_code})")
+
+    # Save to cache
+    with open(cache_path, "wb") as f:
+        f.write(response.content)
+
+    image = Image.open(BytesIO(response.content)).convert("RGBA")
+    if size:
+        image = image.resize(size, Image.LANCZOS)
+
+    return image
 
 # Function to fetch PUUID
 async def get_puuid(gameName, tagLine, mass_region, riot_token):
@@ -566,18 +601,18 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
 async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
     puuid = await get_puuid(gameName, tagLine, mass_region, lol_token)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
             match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid)
             if not match_list:
-                return f"No matches found for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                return f"No matches found for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             match_id = match_list[0]
 
             if not match_id:
-                return f"No recent ranked matches found for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                return f"No recent ranked matches found for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
 
@@ -589,7 +624,7 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
                 player_list.append(participant["riotIdGameName"])
                 if participant["gameEndedInEarlySurrender"] == True:
                     # In case of remake
-                    return True, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                    return True, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
                 if participant["puuid"] == puuid:
                     champ_id = participant["championId"]
                     cs = participant["totalMinionsKilled"]
@@ -601,6 +636,8 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
                     win = participant["win"]
                     keystone_id = participant["perks"]["styles"][0]["selections"][0]["perk"]
                     rune_id = participant["perks"]["styles"][1]["style"]
+                    summ1 = participant["summoner1Id"]
+                    summ2 = participant["summoner2Id"]
                     items.append(participant["item0"]) 
                     items.append(participant["item1"]) 
                     items.append(participant["item2"]) 
@@ -617,10 +654,10 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
                     # visionscore = participant["visionScore"]
                     # team_id = participant["teamId"]
 
-            return False, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, items, ward, killparticipation
+            return False, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1, summ2, items, ward, killparticipation
 
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
         
 # Get recent x matches
 async def recent_matches(gameName, tagLine, puuid, mode, mass_region, tft_token, num_matches):
