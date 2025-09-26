@@ -9,7 +9,7 @@ from aiolimiter import AsyncLimiter
 from collections import Counter
 from discord.ui import View
 from discord.ext import commands
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from pulsefire.clients import RiotAPIClient
 from pulsefire.taskgroups import TaskGroup
 
@@ -343,57 +343,74 @@ class BotCommands(commands.Cog):
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, ward, killparticipation = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
+        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
         
         champ_path = helpers.get_lol_champ_icon(champ_id)
         keystone_path = helpers.get_keystone_icon(self.keystone_mapping, keystone_id).lower()
         runes_path = helpers.get_rune_icon(self.runes_mapping, rune_id).lower()
         summ1_path = helpers.get_summs_icon(self.summs_mapping, summ1_id).lower()
         summ2_path = helpers.get_summs_icon(self.summs_mapping, summ2_id).lower()
-
-        tab_final = Image.new("RGBA", (600, 100), (0, 0, 0, 0))
-
-        champ_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (50,50))
-        keystone_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (25,25))
-        runes_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (25,25))
-        summ1_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (25,25))
-        summ2_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25))
         
-        tab_final.paste(champ_image, (0,0))
-        tab_final.paste(keystone_image, (75,0))
-        tab_final.paste(runes_image,(75,25))
-        tab_final.paste(summ1_image,(50,0))
-        tab_final.paste(summ2_image,(50,25))
-    
+        tab_final = Image.new("RGBA", (500, 100), (0, 0, 0, 0))
+
+        champ_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (60,60))
+        keystone_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (30,30))
+        runes_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (20,20))
+        summ1_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (30,30))
+        summ2_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (30,30))
+        items_image = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_lol_item_icon(self.lol_item_mapping, item).lower()}" for item in items]
+        gold_image = await helpers.fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20))
+        fetch_tasks = [helpers.fetch_image(url, (30, 30)) for url in items_image]
+        item_icons = await asyncio.gather(*fetch_tasks)
+
+        for i, item_icon in enumerate(item_icons):
+            tab_final.paste(item_icon, (160 + 30*i, 70), item_icon)
+
+        tab_final.paste(champ_image, (160,0))
+        tab_final.paste(keystone_image, (250,0))
+        tab_final.paste(runes_image,(255,35))
+        tab_final.paste(summ1_image,(220,0))
+        tab_final.paste(summ2_image,(220,30))
+        tab_final.paste(gold_image, (380,75))
+        draw = ImageDraw.Draw(tab_final)
+
+        font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
+        bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 17)  # Arial Bold
+
+        kda_str = f"{kills} / {deaths} / {assists}"
+        if deaths == 0:
+            kda_ratio_str = "Perfect"
+        else:
+            kda_ratio = (kills + assists) / deaths
+            kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
+        if win:
+            font_color = "#5485eb"
+        else:
+            font_color = "#e64253"
+        minutes, secs = divmod(duration, 60)
+        cspm = cs * 60 / duration
+        time_str = f"{minutes}m {secs}s"
+        kp_str = f"P/Kill {killparticipation:.0%}"
+        cs_str = f"CS {cs} ({cspm:.1f})"
+        gold_str = f" {gold:,}"
+        
+        draw.text((5,0), "Ranked Solo/Duo", font=bold_font, fill=font_color)
+        # draw.text((0,20), "time ago", font=font, fill=font_color) # make time ago
+        draw.text((5,61), "Victory" if win else "Defeat", font=font, fill="white")
+        draw.text((5,81), time_str, font=font, fill="white")
+        draw.text((285,0), kda_str, font=bold_font, fill="white")
+        draw.text((285,26), kda_ratio_str, font=font, fill="white")
+        draw.text((380,0), kp_str, font=font, fill="white")
+        draw.text((380,26), cs_str, font=font, fill="white")
+        draw.text((400,75), gold_str, font=font, fill="white")
+
         tab_final.save("tab_example.png")
         final_file = discord.File("tab_example.png", filename="tab_example.png")
-        result = (
-            f"Remake: {remake}\n"
-            f"Player List: {player_list}\n"
-            f"Duration: {duration}\n"
-            f"Champion ID: {champ_id}\n"
-            f"CS: {cs}\n"
-            f"Level: {level}\n"
-            f"Kills: {kills}\n"
-            f"Deaths: {deaths}\n"
-            f"Assists: {assists}\n"
-            f"Gold: {gold}\n"
-            f"Win: {win}\n"
-            f"Keystone ID: {keystone_id}\n"
-            f"Rune ID: {rune_id}\n"
-            f"Items: {items}\n"
-            f"Ward: {ward}\n"
-            f"Kill Participation: {killparticipation}"
-        )
-
         embed = discord.Embed(
-            title="Recent Ranked LOL Match Results:",
-            description=result,
             color=discord.Color.blue() if win else discord.Color.red()
         )
 
         embed.set_image(url="attachment://tab_example.png")
-        embed.set_footer(text="This is a test output only showing raw data")
 
         await ctx.send(file=final_file, embed=embed)
 
