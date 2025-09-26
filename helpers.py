@@ -316,7 +316,7 @@ def get_companion_icon(companions_json, contentId):
 
 def get_lol_item_icon(lol_item_json, itemId):
     if itemId == 0:
-        return "assets/items/icons2d/gp_ui_placeholder"
+        return "assets/items/icons2d/gp_ui_placeholder.png"
     for item in lol_item_json:
         if itemId == item.get("id"):
             return item.get("iconPath", "")[21:]
