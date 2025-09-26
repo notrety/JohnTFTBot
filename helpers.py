@@ -429,6 +429,36 @@ async def calculate_elo(puuid, tft_token, region):
                 attempts += 1
             else:
                 raise e  # Re-raise other errors
+            
+def time_ago(game_end_ts):
+    # Convert from ms → seconds
+    game_end_seconds = game_end_ts / 1000
+    now_seconds = time.time()
+    diff_seconds = int(now_seconds - game_end_seconds)
+
+    minute = 60
+    hour = 60 * minute
+    day = 24 * hour
+    month = 30 * day  # approx
+    year = 12 * month
+
+    if diff_seconds < minute:
+        return f"{diff_seconds} second{'s' if diff_seconds != 1 else ''} ago"
+    elif diff_seconds < hour:
+        minutes = diff_seconds // minute
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif diff_seconds < day:
+        hours = diff_seconds // hour
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    elif diff_seconds < month:
+        days = diff_seconds // day
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    elif diff_seconds < year:
+        months = diff_seconds // month
+        return f"{months} month{'s' if months != 1 else ''} ago"
+    else:
+        years = diff_seconds // year
+        return f"{years} year{'s' if years != 1 else ''} ago"
 
 # Function to get TFT rank info from puuid and return embed with rank icon
 async def get_rank_embed(name, tagLine, region, tft_token, puuid):
@@ -601,33 +631,34 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
 async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
     puuid = await get_puuid(gameName, tagLine, mass_region, lol_token)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
             match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid)
             if not match_list:
-                return f"No matches found for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                return f"No matches found for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             match_id = match_list[0]
 
             if not match_id:
-                return f"No recent ranked matches found for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                return f"No recent ranked matches found for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
 
             duration = match_info["info"]["gameDuration"]
-            participants = match_info['info']['participants']
+            participants = match_info["info"]["participants"]
+            endstamp = match_info["info"]["gameEndTimestamp"] / 1000
             player_list = []
             items = []
             for participant in participants:
                 player_list.append(participant["riotIdGameName"])
                 if participant["gameEndedInEarlySurrender"] == True:
                     # In case of remake
-                    return True, None, None, None, None, None, None, None, None, None, None, None, None, None, None,  None, None
+                    return True, None, None, None, None, None, None, None, None, None, None, None, None, None, None,  None, None, None
                 if participant["puuid"] == puuid:
                     champ_id = participant["championId"]
-                    cs = participant["totalMinionsKilled"]
+                    cs = participant["totalMinionsKilled"] + participant["neutralMinionsKilled"]
                     level = participant["champLevel"]
                     kills = participant["kills"]
                     deaths = participant["deaths"]
@@ -646,7 +677,6 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
                     items.append(participant["item5"]) 
                     items.append(participant["item6"]) 
                     killparticipation = participant.get("challenges", {}).get("killParticipation", 0)
-
                     # Saving ward info for later
                     # wardkills = participant["wardsKilled"]
                     # wardplace = participant["wardsPlaced"]
@@ -654,10 +684,10 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region):
                     # visionscore = participant["visionScore"]
                     # team_id = participant["teamId"]
 
-            return False, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1, summ2, items, killparticipation
+            return False, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1, summ2, items, killparticipation, endstamp
 
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, None, None, None, None, None, None, None, None, None, None,  None, None, None, None, None
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, None, None, None, None, None, None, None, None, None, None,  None, None, None, None, None, None
         
 # Get recent x matches
 async def recent_matches(gameName, tagLine, puuid, mode, mass_region, tft_token, num_matches):

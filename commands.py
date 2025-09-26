@@ -4,6 +4,8 @@ import dicts
 import asyncio
 import random
 import os
+import time
+import datetime
 import matplotlib.pyplot as plt
 from aiolimiter import AsyncLimiter
 from collections import Counter
@@ -343,7 +345,7 @@ class BotCommands(commands.Cog):
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
+        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
         
         champ_path = helpers.get_lol_champ_icon(champ_id)
         keystone_path = helpers.get_keystone_icon(self.keystone_mapping, keystone_id).lower()
@@ -364,14 +366,14 @@ class BotCommands(commands.Cog):
         item_icons = await asyncio.gather(*fetch_tasks)
 
         for i, item_icon in enumerate(item_icons):
-            tab_final.paste(item_icon, (160 + 30*i, 70), item_icon)
+            tab_final.paste(item_icon, (170 + 30*i, 70), item_icon)
 
-        tab_final.paste(champ_image, (160,0))
-        tab_final.paste(keystone_image, (250,0))
-        tab_final.paste(runes_image,(255,35))
-        tab_final.paste(summ1_image,(220,0))
-        tab_final.paste(summ2_image,(220,30))
-        tab_final.paste(gold_image, (380,75))
+        tab_final.paste(champ_image, (170,0))
+        tab_final.paste(keystone_image, (260,0))
+        tab_final.paste(runes_image,(265,35))
+        tab_final.paste(summ1_image,(230,0))
+        tab_final.paste(summ2_image,(230,30))
+        tab_final.paste(gold_image, (390,75))
         draw = ImageDraw.Draw(tab_final)
 
         font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
@@ -393,20 +395,26 @@ class BotCommands(commands.Cog):
         kp_str = f"P/Kill {killparticipation:.0%}"
         cs_str = f"CS {cs} ({cspm:.1f})"
         gold_str = f" {gold:,}"
-        
-        draw.text((5,0), "Ranked Solo/Duo", font=bold_font, fill=font_color)
-        # draw.text((0,20), "time ago", font=font, fill=font_color) # make time ago
-        draw.text((5,61), "Victory" if win else "Defeat", font=font, fill="white")
-        draw.text((5,81), time_str, font=font, fill="white")
-        draw.text((285,0), kda_str, font=bold_font, fill="white")
-        draw.text((285,26), kda_ratio_str, font=font, fill="white")
-        draw.text((380,0), kp_str, font=font, fill="white")
-        draw.text((380,26), cs_str, font=font, fill="white")
-        draw.text((400,75), gold_str, font=font, fill="white")
+
+        # print("Game end (from Riot):", datetime.utcfromtimestamp(endstamp))
+        # print("Now (UTC):", datetime.utcfromtimestamp(time.time()))
+
+        end_str = helpers.time_ago(endstamp)
+
+        draw.text((15,0), "Ranked Solo/Duo", font=bold_font, fill=font_color)
+        draw.text((15,23), end_str, font=font, fill="white")
+        draw.text((15,61), "Victory" if win else "Defeat", font=font, fill="white")
+        draw.text((15,81), time_str, font=font, fill="white")
+        draw.text((295,0), kda_str, font=bold_font, fill="white")
+        draw.text((295,26), kda_ratio_str, font=font, fill="white")
+        draw.text((390,0), kp_str, font=font, fill="white")
+        draw.text((390,26), cs_str, font=font, fill="white")
+        draw.text((410,75), gold_str, font=font, fill="white")
 
         tab_final.save("tab_example.png")
         final_file = discord.File("tab_example.png", filename="tab_example.png")
         embed = discord.Embed(
+            title=f"Recent LOL match for {gameName}#{tagLine}",
             color=discord.Color.blue() if win else discord.Color.red()
         )
 
