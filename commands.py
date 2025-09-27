@@ -384,8 +384,8 @@ class BotCommands(commands.Cog):
         draw = ImageDraw.Draw(tab_final)
 
         font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
-        bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 17)  # Arial Bold
-
+        bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
+        
         kda_str = f"{kills} / {deaths} / {assists}"
         if deaths == 0:
             kda_ratio_str = "Perfect"
