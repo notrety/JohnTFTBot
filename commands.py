@@ -330,6 +330,13 @@ class BotCommands(commands.Cog):
     @commands.command(name="recentleague", aliases=["rl","lr"])
     async def recent_league(self, ctx, *args):
         
+        mappings = {
+            "lol_item_mapping": self.lol_item_mapping,     # item ID → icon path
+            "keystone_mapping": self.keystone_mapping,     # keystone ID → icon path
+            "runes_mapping": self.runes_mapping,           # rune ID → icon path
+            "summs_mapping": self.summs_mapping            # summoner spell ID → icon path
+        }
+
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         if not gameNum:
             gameNum = 1
@@ -345,7 +352,7 @@ class BotCommands(commands.Cog):
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
+        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
         
         champ_path = helpers.get_lol_champ_icon(champ_id)
         keystone_path = helpers.get_keystone_icon(self.keystone_mapping, keystone_id).lower()
@@ -385,10 +392,6 @@ class BotCommands(commands.Cog):
         else:
             kda_ratio = (kills + assists) / deaths
             kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
-        if win:
-            font_color = "#5485eb"
-        else:
-            font_color = "#e64253"
         minutes, secs = divmod(duration, 60)
         cspm = cs * 60 / duration
         time_str = f"{minutes}m {secs}s"
@@ -396,8 +399,10 @@ class BotCommands(commands.Cog):
         cs_str = f"CS {cs} ({cspm:.1f})"
         gold_str = f" {gold:,}"
 
-        # print("Game end (from Riot):", datetime.utcfromtimestamp(endstamp))
-        # print("Now (UTC):", datetime.utcfromtimestamp(time.time()))
+        if win:
+            font_color = "#5485eb"
+        else:
+            font_color = "#e64253"
 
         end_str = helpers.time_ago(endstamp)
 
@@ -413,14 +418,128 @@ class BotCommands(commands.Cog):
 
         tab_final.save("tab_example.png")
         final_file = discord.File("tab_example.png", filename="tab_example.png")
-        embed = discord.Embed(
+        tab_embed = discord.Embed(
             title=f"Recent LOL match for {gameName}#{tagLine}",
             color=discord.Color.blue() if win else discord.Color.red()
         )
 
-        embed.set_image(url="attachment://tab_example.png")
+        tab_embed.set_image(url="attachment://tab_example.png")
 
-        await ctx.send(file=final_file, embed=embed)
+        async def process_participant(participant, duration, mappings):
+            items = []
+            gameName = participant["riotIdGameName"]
+            tagLine = participant["riotIdTagline"]
+            cs = participant["totalMinionsKilled"] + participant["neutralMinionsKilled"]
+            level = participant["champLevel"]
+            kills = participant["kills"]
+            deaths = participant["deaths"]
+            assists = participant["assists"]
+            win = participant["win"]
+            items.append(participant["item0"]) 
+            items.append(participant["item1"]) 
+            items.append(participant["item2"]) 
+            items.append(participant["item3"]) 
+            items.append(participant["item4"]) 
+            items.append(participant["item5"]) 
+            items.append(participant["item6"]) 
+            killparticipation = participant.get("challenges", {}).get("killParticipation", 0)
+            wardkills = participant["wardsKilled"]
+            wardplace = participant["wardsPlaced"]
+            controlwards = participant["visionWardsBoughtInGame"]
+            visionscore = participant["visionScore"]
+            team_id = participant["teamId"]
+            damagedealt = participant["totalDamageDealtToChampions"]
+            damagetaken = participant["totalDamageTaken"]
+
+            strip = Image.new("RGBA", (600, 60), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(strip)
+            if deaths == 0:
+                kda_ratio_str = "Perfect"
+            else:
+                kda_ratio = (kills + assists) / deaths
+                kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
+            minutes, secs = divmod(duration, 60)
+            cspm = cs * 60 / duration
+            kda_str = f"{kills}/{deaths}/{assists}  {kda_ratio_str}"
+            cs_str = f" CS {cs} \n({cspm:.1f}/m)"
+            if len(gameName) > 15:
+                gameName = gameName[:14] + "…"
+
+            champ_path = helpers.get_lol_champ_icon(participant["championId"])
+            keystone_path = helpers.get_keystone_icon(mappings["keystone_mapping"], participant["perks"]["styles"][0]["selections"][0]["perk"]).lower()
+            runes_path = helpers.get_rune_icon(mappings["runes_mapping"], participant["perks"]["styles"][1]["style"]).lower()
+            summ1_path = helpers.get_summs_icon(mappings["summs_mapping"], participant["summoner1Id"]).lower()
+            summ2_path = helpers.get_summs_icon(mappings["summs_mapping"], participant["summoner2Id"]).lower()
+            items = [participant[f"item{i}"] for i in range(7)]
+            items_urls = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_lol_item_icon(mappings['lol_item_mapping'], item).lower()}" for item in items]
+
+            # --- Fetch images concurrently ---
+            fetch_tasks = [
+                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (50,50)),
+                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (25,25)),
+                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (16,16)),
+                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (25,25)),
+                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25)),
+            ]
+            # Add item icons
+            fetch_tasks.extend([helpers.fetch_image(url, (30,30)) for url in items_urls])
+
+            # Gather all images concurrently
+            images = await asyncio.gather(*fetch_tasks)
+            champ_image, keystone_image, runes_image, summ1_image, summ2_image, *item_icons = images
+
+            strip.paste(champ_image, (15,5))
+            strip.paste(summ1_image, (65,5))
+            strip.paste(summ2_image, (65,30))
+            strip.paste(keystone_image, (90,5))
+            strip.paste(runes_image, (94,34))
+            for i, item_icon in enumerate(item_icons):
+                strip.paste(item_icon, (385 + i*30, 15), item_icon)  # adjust position as needed
+
+            draw.text((115,5), f"{gameName}", font=bold_font, fill="white")
+            draw.text((115,30), kda_str, font=bold_font, fill="white")
+
+            return strip
+
+
+        async def build_team_image(team_participants, duration, mappings):
+            # Run process_participant for each player concurrently
+            strips = await asyncio.gather(*(process_participant(p, duration, mappings) for p in team_participants))
+
+            # Each strip is 600x60 → total height = 60 * number of players
+            team_img = Image.new("RGBA", (600, 300), (0, 0, 0, 0))
+
+            # Paste each strip one below the other
+            for i, strip in enumerate(strips):
+                team_img.paste(strip, (0, i * 60), strip)  # use strip as mask for transparency
+
+            return team_img
+        
+        async with RiotAPIClient(default_headers={"X-Riot-Token": self.lol_token}) as client:
+            match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
+
+        participants = match_info["info"]["participants"]
+
+        blue_team = [p for p in participants if p["teamId"] == 100]
+        red_team = [p for p in participants if p["teamId"] == 200]
+
+        blue_img = await build_team_image(blue_team, duration, mappings)
+        red_img = await build_team_image(red_team, duration, mappings)
+
+        # Now these are PIL Images → you can save them
+        blue_img.save("blue_team.png")
+        red_img.save("red_team.png")
+
+        blue_file = discord.File("blue_team.png", filename="blue_team.png")
+        red_file = discord.File("red_team.png", filename="red_team.png")
+
+        blue_embed = discord.Embed(title="Blue Team", color=discord.Color.blue())
+        blue_embed.set_image(url="attachment://blue_team.png")
+
+        red_embed = discord.Embed(title="Red Team", color=discord.Color.red())
+        red_embed.set_image(url="attachment://red_team.png")
+
+        await ctx.send(files=[final_file,blue_file, red_file], embeds=[tab_embed,blue_embed, red_embed])
 
     # Redirect user to /link
     @commands.command()
