@@ -357,16 +357,17 @@ class BotCommands(commands.Cog):
 
         if user_id:
             data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-        
-        region = self.region
-        mass_region = self.mass_region
+        else:
+            region = self.region
+            mass_region = self.mass_region
+
         puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
         if not puuid:
             print(f"Could not find PUUID for {gameName}#{tagLine}.")
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        err, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region, gameNum, game_type)
+        err, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region, gameNum, game_type)
         
         if err:
             await ctx.send(err)
@@ -403,7 +404,7 @@ class BotCommands(commands.Cog):
 
         font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
         bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
-        
+
         kda_str = f"{kills} / {deaths} / {assists}"
         if deaths == 0:
             kda_ratio_str = "Perfect"
@@ -425,12 +426,12 @@ class BotCommands(commands.Cog):
         kda_color = "#8a8a8a"
         if kda_ratio_str == "Perfect":
             kda_color = "#f78324"
-        if kda_ratio >= 3.00:
+        elif kda_ratio >= 5.00:
+            kda_color = "#f78324"
+        elif kda_ratio >= 4.00:
+            kda_color = "#188ae9"
+        elif kda_ratio >= 3.00:
             kda_color = "#29b0a3"
-            if kda_ratio >= 4.00:
-                kda_color = "#188ae9"
-                if kda_ratio >= 5.00: 
-                    kda_color = "#f78324"
 
         end_str = helpers.time_ago(endstamp)
 
@@ -447,7 +448,7 @@ class BotCommands(commands.Cog):
         tab_final.save("tab_example.png")
         final_file = discord.File("tab_example.png", filename="tab_example.png")
         tab_embed = discord.Embed(
-            title=f"Recent LOL match for {gameName}#{tagLine}",
+            title=f"Recent League match for {gameName}#{tagLine}",
             color=discord.Color.blue() if win else discord.Color.red()
         )
 
@@ -533,12 +534,13 @@ class BotCommands(commands.Cog):
             kda_color = "#8a8a8a"
             if kda_ratio_str == "Perfect":
                 kda_color = "#f78324"
-            if kda_ratio >= 3.00:
+            elif kda_ratio >= 5.00:
+                kda_color = "#f78324"
+            elif kda_ratio >= 4.00:
+                kda_color = "#188ae9"
+            elif kda_ratio >= 3.00:
                 kda_color = "#29b0a3"
-                if kda_ratio >= 4.00:
-                    kda_color = "#188ae9"
-                    if kda_ratio >= 5.00: 
-                        kda_color = "#f78324"
+
 
             draw.text((115,5), f"{gameName}", font=bold_font, fill="white", stroke_width=0)
             draw.text((115,30), kda_str, font=bold_font, fill="white", stroke_width=0)

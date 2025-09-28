@@ -351,7 +351,7 @@ def get_summs_icon(summs_json, summonerId):
 
 async def fetch_image(url: str, size: tuple = None):
 
-    # print("looking for " + url) # troubleshooting line
+    print("looking for " + url) # troubleshooting line
     # Generate a unique filename from the URL
     url_hash = hashlib.sha256(url.encode()).hexdigest()
     ext = os.path.splitext(url)[1].split("?")[0] or ".png"
@@ -634,16 +634,16 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region, g
 
     puuid = await get_puuid(gameName, tagLine, mass_region, lol_token)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Could not find PUUID for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
     if not (1 <= game_num <= 20):
-        return f"Please enter a number between 1 and 20.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Please enter a number between 1 and 20.",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
             match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid, queries={"start": 0, "count": 20})
             if not match_list:
-                return f"No matches found for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                return f"No matches found for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             target_queue = dicts.game_type_to_id[mode]
             match_id = None
@@ -658,20 +658,18 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region, g
                         break
 
             if not match_id:
-                return f"No recent {mode.lower()} matches found for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                return f"No recent {mode} matches found for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
 
             duration = match_info["info"]["gameDuration"]
             participants = match_info["info"]["participants"]
             endstamp = match_info["info"]["gameEndTimestamp"] / 1000
-            player_list = []
             items = []
             for participant in participants:
-                player_list.append(participant["riotIdGameName"])
                 if participant["gameEndedInEarlySurrender"] == True:
                     # In case of remake
-                    return "This game was a remake", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                    return "This game was a remake", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
                 if participant["puuid"] == puuid:
                     champ_id = participant["championId"]
                     cs = participant["totalMinionsKilled"] + participant["neutralMinionsKilled"]
@@ -700,10 +698,10 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, region, g
                     # visionscore = participant["visionScore"]
                     # team_id = participant["teamId"]
 
-            return None, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1, summ2, items, killparticipation, endstamp, match_id
+            return None, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1, summ2, items, killparticipation, endstamp, match_id
 
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
         
 # Get recent x matches
 async def recent_matches(gameName, tagLine, puuid, mode, mass_region, tft_token, num_matches):
