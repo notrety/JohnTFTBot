@@ -359,8 +359,9 @@ class BotCommands(commands.Cog):
         runes_path = helpers.get_rune_icon(self.runes_mapping, rune_id).lower()
         summ1_path = helpers.get_summs_icon(self.summs_mapping, summ1_id).lower()
         summ2_path = helpers.get_summs_icon(self.summs_mapping, summ2_id).lower()
-        
-        tab_final = Image.new("RGBA", (500, 100), (0, 0, 0, 0))
+        background_color = (0,0,0,0)
+
+        tab_final = Image.new("RGBA", (500, 100), background_color)
 
         champ_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (60,60))
         keystone_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (30,30))
@@ -404,6 +405,16 @@ class BotCommands(commands.Cog):
         else:
             font_color = "#e64253"
 
+        kda_color = "#8a8a8a"
+        if kda_ratio_str == "Perfect":
+            kda_color = "#f78324"
+        if kda_ratio >= 3.00:
+            kda_color = "#29b0a3"
+            if kda_ratio >= 4.00:
+                kda_color = "#188ae9"
+                if kda_ratio >= 5.00: 
+                    kda_color = "#f78324"
+
         end_str = helpers.time_ago(endstamp)
 
         draw.text((15,0), "Ranked Solo/Duo", font=bold_font, fill=font_color)
@@ -411,7 +422,7 @@ class BotCommands(commands.Cog):
         draw.text((15,61), "Victory" if win else "Defeat", font=font, fill="white")
         draw.text((15,81), time_str, font=font, fill="white")
         draw.text((295,0), kda_str, font=bold_font, fill="white")
-        draw.text((295,26), kda_ratio_str, font=font, fill="white")
+        draw.text((295,26), kda_ratio_str, font=font, fill=kda_color)
         draw.text((390,0), kp_str, font=font, fill="white")
         draw.text((390,26), cs_str, font=font, fill="white")
         draw.text((410,75), gold_str, font=font, fill="white")
@@ -451,7 +462,10 @@ class BotCommands(commands.Cog):
             damagedealt = participant["totalDamageDealtToChampions"]
             damagetaken = participant["totalDamageTaken"]
 
-            strip = Image.new("RGBA", (600, 60), (0, 0, 0, 0))
+            if participant["puuid"] == puuid:
+                strip = Image.new("RGBA", (600, 60), "#2F3136")
+            else:
+                strip = Image.new("RGBA", (600, 60), background_color)
             draw = ImageDraw.Draw(strip)
             if deaths == 0:
                 kda_ratio_str = "Perfect"
@@ -460,7 +474,7 @@ class BotCommands(commands.Cog):
                 kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
             minutes, secs = divmod(duration, 60)
             cspm = cs * 60 / duration
-            kda_str = f"{kills}/{deaths}/{assists}  {kda_ratio_str}"
+            kda_str = f"{kills}/{deaths}/{assists}"
             cs_str = f" CS {cs} \n({cspm:.1f}/m)"
             if len(gameName) > 15:
                 gameName = gameName[:14] + "…"
@@ -491,13 +505,27 @@ class BotCommands(commands.Cog):
             strip.paste(champ_image, (15,5))
             strip.paste(summ1_image, (65,5))
             strip.paste(summ2_image, (65,30))
-            strip.paste(keystone_image, (90,5))
-            strip.paste(runes_image, (94,34))
+            strip.paste(keystone_image, (90,5),keystone_image)
+            strip.paste(runes_image, (94,34),runes_image)
             for i, item_icon in enumerate(item_icons):
                 strip.paste(item_icon, (385 + i*30, 15), item_icon)  # adjust position as needed
+            
+            bbox = bold_font.getbbox(kda_str)  # (x_min, y_min, x_max, y_max)
+            width1 = bbox[2] - bbox[0]         # text width
 
-            draw.text((115,5), f"{gameName}", font=bold_font, fill="white")
-            draw.text((115,30), kda_str, font=bold_font, fill="white")
+            kda_color = "#8a8a8a"
+            if kda_ratio_str == "Perfect":
+                kda_color = "#f78324"
+            if kda_ratio >= 3.00:
+                kda_color = "#29b0a3"
+                if kda_ratio >= 4.00:
+                    kda_color = "#188ae9"
+                    if kda_ratio >= 5.00: 
+                        kda_color = "#f78324"
+
+            draw.text((115,5), f"{gameName}", font=bold_font, fill="white", stroke_width=0)
+            draw.text((115,30), kda_str, font=bold_font, fill="white", stroke_width=0)
+            draw.text((125 + width1, 30), kda_ratio_str, font=bold_font, fill=kda_color, stroke_width=0)
 
             return strip
 
@@ -506,12 +534,11 @@ class BotCommands(commands.Cog):
             # Run process_participant for each player concurrently
             strips = await asyncio.gather(*(process_participant(p, duration, mappings) for p in team_participants))
 
-            # Each strip is 600x60 → total height = 60 * number of players
-            team_img = Image.new("RGBA", (600, 300), (0, 0, 0, 0))
+            # Each strip is 600x60 → total height = 300
+            team_img = Image.new("RGBA", (600, 300), background_color)
 
-            # Paste each strip one below the other
             for i, strip in enumerate(strips):
-                team_img.paste(strip, (0, i * 60), strip)  # use strip as mask for transparency
+                team_img.paste(strip, (0, i * 60)) 
 
             return team_img
         
@@ -526,6 +553,8 @@ class BotCommands(commands.Cog):
         blue_img = await build_team_image(blue_team, duration, mappings)
         red_img = await build_team_image(red_team, duration, mappings)
 
+        blue_win = match_info["info"]["teams"][0]["win"] 
+
         # Now these are PIL Images → you can save them
         blue_img.save("blue_team.png")
         red_img.save("red_team.png")
@@ -533,10 +562,16 @@ class BotCommands(commands.Cog):
         blue_file = discord.File("blue_team.png", filename="blue_team.png")
         red_file = discord.File("red_team.png", filename="red_team.png")
 
-        blue_embed = discord.Embed(title="Blue Team", color=discord.Color.blue())
+        blue_embed = discord.Embed(
+            # title="Victory (Blue team)" if blue_win else "Defeat (Blue team)",
+            color=discord.Color.blue() if blue_win else discord.Color.red()
+        )
         blue_embed.set_image(url="attachment://blue_team.png")
 
-        red_embed = discord.Embed(title="Red Team", color=discord.Color.red())
+        red_embed = discord.Embed(
+            # title="Defeat (Red team)" if blue_win else "Victory (Red team)",
+            color=discord.Color.red() if blue_win else discord.Color.blue()
+            )
         red_embed.set_image(url="attachment://red_team.png")
 
         await ctx.send(files=[final_file,blue_file, red_file], embeds=[tab_embed,blue_embed, red_embed])
