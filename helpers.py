@@ -155,6 +155,8 @@ async def daily_store_stats(collection, tft_token):
                 if entry['queueType'] == 'RANKED_TFT':
                     total_games = entry['wins'] + entry['losses']
                     elo = dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints'])
+            if games is None:
+                games = 0
             today_games = total_games - games
         if today_games >= 0:
             print("Updating  " + name)
