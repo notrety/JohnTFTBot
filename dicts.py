@@ -35,6 +35,41 @@ rank_to_elo = {
     "CHALLENGER I": 2800,
 }
 
+rank_to_text_fill = {
+    "UNRANKED": "#010913",
+    "IRON": "#3b2c29",
+    "BRONZE": "#85574e",
+    "SILVER": "#3e4a5f",
+    "GOLD": "#a4702f",
+    "PLATINUM": "#247987",
+    "EMERALD": "#0a8348",
+    "DIAMOND": "#476bc1",
+    "MASTER": "#b543bb",
+    "GRANDMASTER": "#9f272f",
+    "CHALLENGER": "#539bee",
+}
+
+rank_to_acronym = {
+    "UNRANKED": "U",
+    "IRON": "I",
+    "BRONZE": "B",
+    "SILVER": "S",
+    "GOLD": "G",
+    "PLATINUM": "P",
+    "EMERALD": "E",
+    "DIAMOND": "D",
+    "MASTER": "M",
+    "GRANDMASTER": "GM",
+    "CHALLENGER": "C",
+}
+
+rank_to_number = {
+    "I": "1",
+    "II": "2",
+    "III": "3",
+    "IV": "4"
+}
+
 # Dictionary Converting Game Type to Queue ID
 game_type_to_id = {
     "Draft Pick": 400,

@@ -472,11 +472,6 @@ class BotCommands(commands.Cog):
             items.append(participant["item5"]) 
             items.append(participant["item6"]) 
             killparticipation = participant.get("challenges", {}).get("killParticipation", 0)
-            wardkills = participant["wardsKilled"]
-            wardplace = participant["wardsPlaced"]
-            controlwards = participant["visionWardsBoughtInGame"]
-            visionscore = participant["visionScore"]
-            team_id = participant["teamId"]
             damagedealt = participant["totalDamageDealtToChampions"]
             damagetaken = participant["totalDamageTaken"]
 
@@ -520,6 +515,19 @@ class BotCommands(commands.Cog):
             images = await asyncio.gather(*fetch_tasks)
             champ_image, keystone_image, runes_image, summ1_image, summ2_image, *item_icons = images
 
+            try: 
+                rank_info = await helpers.get_lol_rank_info(region, participant["puuid"], self.lol_token)
+            except Exception as err:
+                return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+        
+            tier = "UNRANKED"
+            rank = "I"
+            if rank_info:
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_SOLO_5x5':
+                        tier = entry['tier']
+                        rank = entry['rank']
+            
             strip.paste(champ_image, (15,5))
             strip.paste(summ1_image, (65,5))
             strip.paste(summ2_image, (65,30))
@@ -541,10 +549,27 @@ class BotCommands(commands.Cog):
             elif kda_ratio >= 3.00:
                 kda_color = "#29b0a3"
 
+            rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
 
-            draw.text((115,5), f"{gameName}", font=bold_font, fill="white", stroke_width=0)
-            draw.text((115,30), kda_str, font=bold_font, fill="white", stroke_width=0)
-            draw.text((125 + width1, 30), kda_ratio_str, font=bold_font, fill=kda_color, stroke_width=0)
+            bbox = bold_font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
+            text_w = bbox[2] - bbox[0]
+
+            padding_x = 6
+
+            x, y = 115, 5
+
+            rect_coords = [
+                x, 
+                y, 
+                x + text_w + padding_x, 
+                28
+            ]
+
+            draw.rounded_rectangle(rect_coords, radius=8, fill=dicts.rank_to_text_fill[tier], outline=None)
+            draw.text((118, 5), rank_str, font=bold_font, fill="#fdda82" if tier == "CHALLENGER" else "white")
+            draw.text((130 + text_w,5), f"{gameName}", font=bold_font, fill="white")
+            draw.text((115,30), kda_str, font=bold_font, fill="white")
+            draw.text((125 + width1, 30), kda_ratio_str, font=bold_font, fill=kda_color)
 
             return strip
 
