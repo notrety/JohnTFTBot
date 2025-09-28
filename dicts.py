@@ -37,6 +37,14 @@ rank_to_elo = {
 
 # Dictionary Converting Game Type to Queue ID
 game_type_to_id = {
+    "Draft Pick": 400,
+    "Ranked Solo/Duo": 420,
+    "Blind Pick": 430,
+    "Ranked Flex": 440,
+    "ARAM": 450,
+    "Swiftplay": 490,
+    "Clash": 700,
+    "ARAM Clash": 720,
     "Ranked": 1100,
     "Normal": 1090,
     "Double Up": 1160,

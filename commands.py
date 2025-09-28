@@ -327,9 +327,23 @@ class BotCommands(commands.Cog):
         os.remove("player_board.png")
 
     # League recent command
-    @commands.command(name="recentleague", aliases=["rl","lr"])
+    @commands.command(name="recentleague", aliases=["rl","lr","lrn","lrd","lra","lrf","lrc","lrac","lrq"])
     async def recent_league(self, ctx, *args):
-        
+        if ctx.invoked_with == "lrn" or ctx.invoked_with == "lrd":
+            game_type = "Draft Pick"
+        elif ctx.invoked_with == "lra":
+            game_type = "ARAM"
+        elif ctx.invoked_with == "lrf":
+            game_type = "Ranked Flex"
+        elif ctx.invoked_with == "lrc":
+            game_type = "Clash"
+        elif ctx.invoked_with == "lrac":
+            game_type = "ARAM Clash"
+        elif ctx.invoked_with == "lrq":
+            game_type = "Swiftplay"
+        else:
+            game_type = "Ranked Solo/Duo"
+
         mappings = {
             "lol_item_mapping": self.lol_item_mapping,     # item ID → icon path
             "keystone_mapping": self.keystone_mapping,     # keystone ID → icon path
@@ -352,8 +366,11 @@ class BotCommands(commands.Cog):
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        remake, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region)
+        err, player_list, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region, gameNum, game_type)
         
+        if err:
+            await ctx.send(err)
+
         champ_path = helpers.get_lol_champ_icon(champ_id)
         keystone_path = helpers.get_keystone_icon(self.keystone_mapping, keystone_id).lower()
         runes_path = helpers.get_rune_icon(self.runes_mapping, rune_id).lower()
@@ -417,7 +434,7 @@ class BotCommands(commands.Cog):
 
         end_str = helpers.time_ago(endstamp)
 
-        draw.text((15,0), "Ranked Solo/Duo", font=bold_font, fill=font_color)
+        draw.text((15,0), f"{game_type}", font=bold_font, fill=font_color)
         draw.text((15,23), end_str, font=font, fill="white")
         draw.text((15,61), "Victory" if win else "Defeat", font=font, fill="white")
         draw.text((15,81), time_str, font=font, fill="white")
