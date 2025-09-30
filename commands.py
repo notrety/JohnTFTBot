@@ -367,7 +367,7 @@ class BotCommands(commands.Cog):
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
         # use last_match league command
-        err, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region, gameNum, game_type)
+        err, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id, max_damage, max_taken = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region, gameNum, game_type)
         
         if err:
             await ctx.send(err)
@@ -459,11 +459,9 @@ class BotCommands(commands.Cog):
             gameName = participant["riotIdGameName"]
             tagLine = participant["riotIdTagline"]
             cs = participant["totalMinionsKilled"] + participant["neutralMinionsKilled"]
-            level = participant["champLevel"]
             kills = participant["kills"]
             deaths = participant["deaths"]
             assists = participant["assists"]
-            win = participant["win"]
             items.append(participant["item0"]) 
             items.append(participant["item1"]) 
             items.append(participant["item2"]) 
@@ -485,10 +483,11 @@ class BotCommands(commands.Cog):
             else:
                 kda_ratio = (kills + assists) / deaths
                 kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
-            minutes, secs = divmod(duration, 60)
             cspm = cs * 60 / duration
             kda_str = f"{kills}/{deaths}/{assists}"
-            cs_str = f" CS {cs} \n({cspm:.1f}/m)"
+            cs_str = f" CS {cs} "
+            cspm_str = f"{cspm:.1f}/m"
+
             if len(gameName) > 15:
                 gameName = gameName[:14] + "…"
 
@@ -509,7 +508,7 @@ class BotCommands(commands.Cog):
                 helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25)),
             ]
             # Add item icons
-            fetch_tasks.extend([helpers.fetch_image(url, (30,30)) for url in items_urls])
+            fetch_tasks.extend([helpers.fetch_image(url, (25,25)) for url in items_urls])
 
             # Gather all images concurrently
             images = await asyncio.gather(*fetch_tasks)
@@ -531,11 +530,28 @@ class BotCommands(commands.Cog):
             strip.paste(champ_image, (15,5))
             strip.paste(summ1_image, (65,5))
             strip.paste(summ2_image, (65,30))
-            strip.paste(keystone_image, (90,5),keystone_image)
-            strip.paste(runes_image, (94,34),runes_image)
+            strip.paste(keystone_image, (90,5), keystone_image)
+            strip.paste(runes_image, (94,34), runes_image)
+            strip.paste(gold_image, (515,35), gold_image)
             for i, item_icon in enumerate(item_icons):
-                strip.paste(item_icon, (385 + i*30, 15), item_icon)  # adjust position as needed
+                strip.paste(item_icon, (410 + i*25, 5), item_icon)  # adjust position as needed
             
+            percentMaxDamage = damagedealt / max_damage
+
+            damage_coords = [
+                410,
+                35,
+                410 + percentMaxDamage * 100,
+                55
+            ]
+
+            damageFill_coords = [
+                410 + percentMaxDamage * 100,
+                35,
+                510,
+                55
+
+            ]
             bbox = bold_font.getbbox(kda_str)  # (x_min, y_min, x_max, y_max)
             width1 = bbox[2] - bbox[0]         # text width
 
@@ -550,7 +566,10 @@ class BotCommands(commands.Cog):
                 kda_color = "#29b0a3"
 
             rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
+            damage_str = f"{damagedealt/1000:.1f}k"
+            participant_gold_str = f"{participant["goldEarned"]/1000:.1f}k"
 
+            damage_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 16)  
             bbox = bold_font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
             text_w = bbox[2] - bbox[0]
 
@@ -565,11 +584,29 @@ class BotCommands(commands.Cog):
                 28
             ]
 
+
+            def draw_centered(draw, text, font, center_x, y, fill="white"):
+                bbox = font.getbbox(text)
+                text_w = bbox[2] - bbox[0]
+                # left x so that text's midpoint sits on center_x
+                x = center_x - text_w // 2
+                draw.text((x, y), text, font=font, fill=fill)
+
+                          
+            draw.rectangle(damage_coords, fill="#e94054", outline=None)
+            draw.rectangle(damageFill_coords, fill="#2a2736", outline=None)
+            draw.rectangle([45,35,65,55], fill="black", outline=None)
+            draw.text((412,35), damage_str, font = damage_font, fill = "white")
             draw.rounded_rectangle(rect_coords, radius=8, fill=dicts.rank_to_text_fill[tier], outline=None)
             draw.text((118, 5), rank_str, font=bold_font, fill="#fdda82" if tier == "CHALLENGER" else "white")
             draw.text((130 + text_w,5), f"{gameName}", font=bold_font, fill="white")
             draw.text((115,30), kda_str, font=bold_font, fill="white")
             draw.text((125 + width1, 30), kda_ratio_str, font=bold_font, fill=kda_color)
+            draw.text((535,35),participant_gold_str, font=damage_font, fill="white")
+
+            draw_centered(draw, cs_str, damage_font, 360, y=10, fill="white")
+            draw_centered(draw, cspm_str, damage_font, 360, y=30, fill="white")
+            draw_centered(draw, str(participant["champLevel"]), damage_font, 55, y=35, fill="white")
 
             return strip
 
