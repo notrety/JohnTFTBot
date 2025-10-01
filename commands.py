@@ -6,7 +6,6 @@ import random
 import os
 import aiohttp
 import matplotlib.pyplot as plt
-from aiolimiter import AsyncLimiter
 from collections import Counter
 from discord.ui import View
 from discord.ext import commands
@@ -609,7 +608,6 @@ class BotCommands(commands.Cog):
 
             return strip
 
-
         async def build_team_image(team_participants, duration, mappings):
             # Run process_participant for each player concurrently
             strips = await asyncio.gather(*(process_participant(p, duration, mappings) for p in team_participants))
@@ -772,6 +770,9 @@ class BotCommands(commands.Cog):
         user_elo_and_name = []
 
         async def process_user(user, session):
+            if server:
+                if not int(user['discord_id']) in members:
+                    return
             try:
                 user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(
                     user['puuid'], self.tft_token, user['region'], session

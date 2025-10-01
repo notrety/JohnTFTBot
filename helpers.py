@@ -10,19 +10,12 @@ from datetime import datetime
 from PIL import Image
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
-from aiolimiter import AsyncLimiter
 import os
 import hashlib
 
-per_sec_limiter = AsyncLimiter(20, 1)
-per_2min_limiter = AsyncLimiter(100, 120)
-concurrency = asyncio.Semaphore(20)
-
 CACHE_DIR = "image_cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
-per_sec_limiter = AsyncLimiter(20, 3)     # 20 per 1 second
-per_min_limiter = AsyncLimiter(100, 60)   # 100 per 60 seconds
 
+os.makedirs(CACHE_DIR, exist_ok=True)
 async def get_all_set_placements(collection, mass_region, tft_token):
     players = list(collection.find({}))
     print("player list obtained")
@@ -142,7 +135,6 @@ async def reset_database(collection):
                     }}
                 )
 
-
 async def daily_store_stats(collection, tft_token):
     all_users = collection.find()
     for user in all_users:
@@ -223,30 +215,25 @@ async def daily_store_stats(collection, tft_token):
                     {"$set": {"games": total_games, "elo": elo, "win_rate": rounded_win_rate, "average_placement": rounded_avp}}
                 )
         
-
 # Update after pulsefire adds endpoint for league_v1_by_puuid
 async def get_rank_info(region, puuid, tft_token, session):
     url = f"https://{region}.api.riotgames.com/tft/league/v1/by-puuid/{puuid}"
     headers = {"X-Riot-Token": tft_token}
-    async with concurrency:
-        async with per_sec_limiter, per_2min_limiter:
-            print(f"Task {puuid} started at {asyncio.get_event_loop().time():.2f}")
-
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    try:
-                        return await response.json()
-                    except Exception as e:
-                        print(f"JSON decode error: {e}")
-                        return None
-                elif response.status == 429:
-                    retry_after = int(response.headers.get("Retry-After", "1"))
-                    print(f"Rate limited for {puuid}, retrying in {retry_after}s")
-                    await asyncio.sleep(retry_after)
-                    return await get_rank_info(region, puuid, tft_token, session)  # retry internally
-                else:
-                    print(f"Error fetching rank info: {response.status}")
-                    return None
+    async with session.get(url, headers=headers) as response:
+        if response.status == 200:
+            try:
+                return await response.json()
+            except Exception as e:
+                print(f"JSON decode error: {e}")
+                return None
+        elif response.status == 429:
+            retry_after = int(response.headers.get("Retry-After", "1"))
+            print(f"Rate limited for {puuid}, retrying in {retry_after}s")
+            await asyncio.sleep(retry_after)
+            return await get_rank_info(region, puuid, tft_token, session)  # retry internally
+        else:
+            print(f"Error fetching rank info: {response.status}")
+            return None
 
 async def get_lol_rank_info(region, puuid, lol_token):
     url = f"https://{region}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
@@ -372,8 +359,7 @@ def get_summs_icon(summs_json, summonerId):
     return None 
 
 async def fetch_image(url: str, size: tuple = None):
-
-    print("looking for " + url) # troubleshooting line
+    # print("looking for " + url) # troubleshooting line
     # Generate a unique filename from the URL
     url_hash = hashlib.sha256(url.encode()).hexdigest()
     ext = os.path.splitext(url)[1].split("?")[0] or ".png"
