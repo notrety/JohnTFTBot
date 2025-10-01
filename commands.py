@@ -4,8 +4,7 @@ import dicts
 import asyncio
 import random
 import os
-import time
-import datetime
+import aiohttp
 import matplotlib.pyplot as plt
 from aiolimiter import AsyncLimiter
 from collections import Counter
@@ -293,7 +292,7 @@ class BotCommands(commands.Cog):
         ] 
 
         # --- Dropdown View ---
-        class PlayerSwitchView(View):
+        class PlayerSwitchView(discord.ui.View):
             def __init__(self, index, author_id):
                 super().__init__()
                 self.index = index
@@ -655,7 +654,40 @@ class BotCommands(commands.Cog):
             )
         red_embed.set_image(url="attachment://red_team.png")
 
-        await ctx.send(files=[final_file,blue_file, red_file], embeds=[tab_embed,blue_embed, red_embed])
+        # # --- Dropdown View ---
+        # class ToggleTeamView(discord.ui.View):
+        #     def __init__(self, mode):
+        #         super().__init__()
+        #         self.mode = mode
+
+        #     @discord.ui.select(
+        #         placeholder="Display Type", 
+        #         options=[
+        #             discord.SelectOption(label="Compact", value="0"),
+        #             discord.SelectOption(label="Full", value="1")
+        #         ], 
+        #         max_values= 1)
+            
+        #     async def switch_mode(self, interaction: discord.Interaction, select: discord.ui.Select):  
+
+        #         await interaction.response.defer()
+        #         new_mode = int(select.values[0])
+
+        #         if new_mode == 1:
+        #             await interaction.message.edit(
+        #                 files=[final_file,blue_file, red_file], 
+        #                 embeds=[tab_embed,blue_embed, red_embed],
+        #                 view=ToggleTeamView(new_mode)
+        #             )
+        #         elif new_mode == 0:
+        #             await interaction.message.edit(
+        #                 files=[final_file], 
+        #                 embeds=[tab_embed, red_embed],
+        #                 view=ToggleTeamView(new_mode)
+        #             )
+
+        # await ctx.send(files=[final_file], embeds=[tab_embed],view=ToggleTeamView(0))
+        await ctx.send(files=[final_file,blue_file,red_file], embeds=[tab_embed, blue_embed, red_embed])
 
     # Redirect user to /link
     @commands.command()
@@ -738,29 +770,25 @@ class BotCommands(commands.Cog):
         
         # Create a list to store all users' elo and name
         user_elo_and_name = []
-        rate_limiter = AsyncLimiter(20, 1)  # 20 per 1 second
 
-        async def process_user(user):
-            if server:
-                if not int(user['discord_id']) in members:
-                    return
-            name = user['name']
-            tag = user['tag']
-            region = user['region']
-            puuid = user['puuid']
-            try:                
-                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(puuid, self.tft_token, region)
-                name_and_tag = f"{name}#{tag}"
-                user_elo_and_name.append((user_elo, user_tier, user_rank, user_lp, name_and_tag, region))
+        async def process_user(user, session):
+            try:
+                user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(
+                    user['puuid'], self.tft_token, user['region'], session
+                )
+                name_and_tag = f"{user['name']}#{user['tag']}"
+                user_elo_and_name.append(
+                    (user_elo, user_tier, user_rank, user_lp, name_and_tag, user['region'])
+                )
             except Exception as e:
-                await ctx.send(f"Error processing {name}#{tag}: {e}")
+                await ctx.send(f"Error processing {user['name']}#{user['tag']}: {e}")
 
-        async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
-            async with TaskGroup() as tg:
-                for user in all_users:
-                    async with rate_limiter:
-                        await tg.create_task(process_user(user))
-        
+        async with aiohttp.ClientSession() as session:
+            async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
+                async with asyncio.TaskGroup() as tg:
+                    for user in all_users:
+                        tg.create_task(process_user(user, session))
+            
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
 
@@ -946,8 +974,8 @@ class BotCommands(commands.Cog):
 
             if not puuid:
                 text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
-    
-            rank_info = await helpers.get_rank_info(region, puuid, self.tft_token)
+                async with aiohttp.ClientSession() as session:
+                    rank_info = await helpers.get_rank_info(region, puuid, self.tft_token, session)
             db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
             if not db_user_data:
                 text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
@@ -1054,12 +1082,14 @@ class BotCommands(commands.Cog):
             p2_gameName = p2_name.replace("_", " ")
             failedFetch = False
             try:
-                p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.tft_token)
+                async with aiohttp.ClientSession() as session:
+                    p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.tft_token, session)
             except Exception as err:
                 error_message = f"Error fetching rank info for {p1_gameName}#{p1_tag}: {err}. "
                 failedFetch = True
             try:
-                p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.tft_token)
+                async with aiohttp.ClientSession() as session:
+                    p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.tft_token, session)
             except Exception as err:
                 error_message += f"Error fetching rank info for {p2_gameName}#{p2_tag}: {err}."
                 failedFetch = True
