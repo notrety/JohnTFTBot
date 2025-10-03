@@ -684,7 +684,7 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Function to grab previous match data
-async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color):
+async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color, header):
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
@@ -796,7 +796,6 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     draw.text((390,26), cs_str, font=font, fill="white")
                     draw.text((410,75), gold_str, font=font, fill="white")
 
-                    print("hi")
                     buffer = BytesIO()
                     tab_final.save(buffer, format="PNG")
                     buffer.seek(0)
@@ -805,7 +804,7 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     final_file = discord.File(buffer, filename=filename)
 
                     tab_embed = discord.Embed(
-                        title=f"Recent League match for {gameName}#{tagLine}",
+                        title=f"Recent League match for {gameName}#{tagLine}"if header else None,
                         color=discord.Color.blue() if win else discord.Color.red()
                     )
                     tab_embed.set_image(url=f"attachment://{filename}")

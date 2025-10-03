@@ -12,6 +12,7 @@ from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 from pulsefire.clients import RiotAPIClient
 from pulsefire.taskgroups import TaskGroup
+from datetime import datetime, timedelta, timezone
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
@@ -374,7 +375,7 @@ class BotCommands(commands.Cog):
         if not match_id:
             return f"No recent {game_type} matches found for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None
 
-        error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color)
+        error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color, True)
         async def process_participant(participant, duration, mappings):
             items = []
             gameName = participant["riotIdGameName"]
@@ -633,26 +634,34 @@ class BotCommands(commands.Cog):
         if error:
             return error, None, None, None, None, None, None, None, None
         
-        recent_matches = match_ids[-10:]  # assuming match_ids is already sorted oldest → newest
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        # Filter matches that ended within the last 24 hours
+        recent_matches = [
+            match for match in match_ids
+            if datetime.fromtimestamp(match["timestamp"] / 1000, tz=timezone.utc) >= cutoff
+        ]
+
+        recent_matches = recent_matches[-10:]
 
         results = []
         async with asyncio.TaskGroup() as tg:
+            tasks = []
             for match in recent_matches:
                 match_id = match["match_id"]
-
                 print(match_id)
-                tg.create_task(
+
+                task = tg.create_task(
                     helpers.league_last_match(
                         gameName, tagLine, mass_region, self.lol_token,
-                        puuid, match_id, game_type, mappings, background_color
+                        puuid, match_id, game_type, mappings, background_color, False
                     )
                 )
+                tasks.append(task)
 
-            # Once the group finishes, collect results
-            # tg.tasks holds all tasks in the group
-            for task in tg.tasks:
-                print("finished one")
-                results.append(await task)
+        for task in tasks:
+            results.append(task.result())
+
         embeds = []
         files = []
         for res in results:
@@ -670,7 +679,6 @@ class BotCommands(commands.Cog):
             await ctx.send(files=files, embeds=embeds)
         else:
             await ctx.send("No valid matches to display.")
-
 
     # Redirect user to /link
     @commands.command()
