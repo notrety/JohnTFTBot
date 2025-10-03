@@ -7,7 +7,7 @@ import requests
 import dicts
 import time
 from datetime import datetime
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 import os
@@ -359,7 +359,7 @@ def get_summs_icon(summs_json, summonerId):
     return None 
 
 async def fetch_image(url: str, size: tuple = None):
-    # print("looking for " + url) # troubleshooting line
+    print("looking for " + url) # troubleshooting line
     # Generate a unique filename from the URL
     url_hash = hashlib.sha256(url.encode()).hexdigest()
     ext = os.path.splitext(url)[1].split("?")[0] or ".png"
@@ -550,6 +550,51 @@ def round_elo_to_rank(avg_elo):
     rank = next((key for key, val in dicts.rank_to_elo.items() if val == rounded_elo), None)
     return rank, 0
 
+async def find_match_ids(gameName, tagLine, mode, game, mass_region, token):
+
+    puuid = await get_puuid(gameName, tagLine, mass_region, token)
+    if not puuid:
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None
+
+    try:
+        async with RiotAPIClient(default_headers={"X-Riot-Token": token}) as client:
+            if game == "TFT":
+                match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+            elif game == "League":
+                match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid, queries={"start": 0, "count": 20})
+
+            if not match_list:
+                return f"No matches found for {gameName}#{tagLine}.", None, puuid
+
+            target_queue = dicts.game_type_to_id[mode]
+            matching_data = []
+
+            async def mark_match_time(game, match_id, target_queue):
+                if game == "TFT":
+                    match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+                    queue_id = match_info['info']['queue_id']
+                    if queue_id == target_queue:
+                        matching_data.append({
+                            "match_id": match_id,
+                            "timestamp": match_info['info']['game_datetime']
+                        })
+                elif game == "League":
+                    match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
+                    queue_id = match_info['info']['queueId']
+                    if queue_id == target_queue:
+
+                        matching_data.append({
+                            "match_id": match_id,
+                            "timestamp": match_info['info']['gameEndTimestamp']
+                        })
+
+            await asyncio.gather(*[mark_match_time(game, match_id, target_queue) for match_id in match_list])
+
+            time_sorted = sorted(matching_data, key=lambda x: x["timestamp"], reverse=True)
+            return None, time_sorted, puuid
+    except Exception as err:
+            return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, puuid
+    
 # Function to grab previous match data
 async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, game_num):
     puuid = await get_puuid(gameName, tagLine, mass_region, tft_token)
@@ -639,83 +684,136 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Function to grab previous match data
-async def league_last_match(gameName, tagLine, mass_region, lol_token, region, game_num, mode):
-
-    puuid = await get_puuid(gameName, tagLine, mass_region, lol_token)
-    if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
-
-    if not (1 <= game_num <= 20):
-        return f"Please enter a number between 1 and 20.",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color):
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
-            match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid, queries={"start": 0, "count": 20})
-            if not match_list:
-                return f"No matches found for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
-
-            target_queue = dicts.game_type_to_id[mode]
-            match_id = None
-            
-            for match in match_list:
-                match_info = await client.get_lol_match_v5_match(region=mass_region, id=match)
-                queue_id = match_info['info']['queueId']
-                if queue_id == target_queue:
-                    game_num -= 1
-                    if game_num == 0:
-                        match_id = match
-                        break
-
-            if not match_id:
-                return f"No recent {mode} matches found for {gameName}#{tagLine}.", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
             match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
 
             duration = match_info["info"]["gameDuration"]
             participants = match_info["info"]["participants"]
             endstamp = match_info["info"]["gameEndTimestamp"] / 1000
-            items = []
             maxDamage = participants[0]["totalDamageDealtToChampions"]
             maxTaken = participants[0]["totalDamageTaken"]
+            blue_team = [p for p in participants if p["teamId"] == 100]
+            red_team = [p for p in participants if p["teamId"] == 200]
+
+            blue_win = match_info["info"]["teams"][0]["win"]
+
             for participant in participants:
                 maxDamage = max(participant["totalDamageDealtToChampions"],maxDamage)
                 maxTaken = max(participant["totalDamageTaken"],maxTaken)
                 
                 if participant["gameEndedInEarlySurrender"] == True:
                     # In case of remake
-                    return "This game was a remake", None,  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+                    return "This game was a remake", None, None, None, None
                 if participant["puuid"] == puuid:
-                    champ_id = participant["championId"]
                     cs = participant["totalMinionsKilled"] + participant["neutralMinionsKilled"]
                     level = participant["champLevel"]
                     kills = participant["kills"]
                     deaths = participant["deaths"]
                     assists = participant["assists"]
                     gold = participant["goldEarned"]
-                    win = participant["win"]
-                    keystone_id = participant["perks"]["styles"][0]["selections"][0]["perk"]
-                    rune_id = participant["perks"]["styles"][1]["style"]
-                    summ1 = participant["summoner1Id"]
-                    summ2 = participant["summoner2Id"]
-                    items.append(participant["item0"]) 
-                    items.append(participant["item1"]) 
-                    items.append(participant["item2"]) 
-                    items.append(participant["item3"]) 
-                    items.append(participant["item4"]) 
-                    items.append(participant["item5"]) 
-                    items.append(participant["item6"]) 
                     killparticipation = participant.get("challenges", {}).get("killParticipation", 0)
-                    # Saving ward info for later
-                    # wardkills = participant["wardsKilled"]
-                    # wardplace = participant["wardsPlaced"]
-                    # controlwards = participant["visionWardsBoughtInGame"]
-                    # visionscore = participant["visionScore"]
-                    # team_id = participant["teamId"]
+                    win = participant["win"]
+                    tab_final = Image.new("RGBA", (500, 100), background_color)
 
-            return None, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1, summ2, items, killparticipation, endstamp, match_id, maxDamage, maxTaken
+                    champ_path = get_lol_champ_icon(participant["championId"])
+                    keystone_path = get_keystone_icon(mappings["keystone_mapping"], participant["perks"]["styles"][0]["selections"][0]["perk"]).lower()
+                    runes_path = get_rune_icon(mappings["runes_mapping"], participant["perks"]["styles"][1]["style"]).lower()
+                    summ1_path = get_summs_icon(mappings["summs_mapping"], participant["summoner1Id"]).lower()
+                    summ2_path = get_summs_icon(mappings["summs_mapping"], participant["summoner2Id"]).lower()
+                    items = [participant[f"item{i}"] for i in range(7)]
+                    items_urls = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{get_lol_item_icon(mappings['lol_item_mapping'], item).lower()}" for item in items]
+
+                    # --- Fetch images concurrently ---
+                    fetch_tasks = [
+                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (50,50)),
+                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (25,25)),
+                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (16,16)),
+                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (25,25)),
+                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25)),
+                        fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20)),
+                    ]
+                    # Add item icons
+                    fetch_tasks.extend([fetch_image(url, (25,25)) for url in items_urls])
+
+                    images = await asyncio.gather(*fetch_tasks)
+                    champ_image, keystone_image, runes_image, summ1_image, summ2_image, gold_image, *item_icons = images
+
+                    for i, item_icon in enumerate(item_icons):
+                        tab_final.paste(item_icon, (170 + 30*i, 70), item_icon)
+
+                    tab_final.paste(champ_image, (170,0))
+                    tab_final.paste(keystone_image, (260,0))
+                    tab_final.paste(runes_image,(265,35))
+                    tab_final.paste(summ1_image,(230,0))
+                    tab_final.paste(summ2_image,(230,30))
+                    tab_final.paste(gold_image, (390,75))
+                    draw = ImageDraw.Draw(tab_final)
+
+                    font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
+                    bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
+
+                    kda_str = f"{kills} / {deaths} / {assists}"
+                    if deaths == 0:
+                        kda_ratio_str = "Perfect"
+                    else:
+                        kda_ratio = (kills + assists) / deaths
+                        kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
+                    minutes, secs = divmod(duration, 60)
+                    cspm = cs * 60 / duration
+                    time_str = f"{minutes}m {secs}s"
+                    kp_str = f"P/Kill {killparticipation:.0%}"
+                    cs_str = f"CS {cs} ({cspm:.1f})"
+                    gold_str = f" {gold:,}"
+
+                    if win:
+                        font_color = "#5485eb"
+                    else:
+                        font_color = "#e64253"
+
+                    kda_color = "#8a8a8a"
+                    if kda_ratio_str == "Perfect":
+                        kda_color = "#f78324"
+                    elif kda_ratio >= 5.00:
+                        kda_color = "#f78324"
+                    elif kda_ratio >= 4.00:
+                        kda_color = "#188ae9"
+                    elif kda_ratio >= 3.00:
+                        kda_color = "#29b0a3"
+
+                    end_str = time_ago(endstamp)
+
+                    draw.text((15,0), f"{mode}", font=bold_font, fill=font_color)
+                    draw.text((15,23), end_str, font=font, fill="white")
+                    draw.text((15,61), "Victory" if win else "Defeat", font=font, fill="white")
+                    draw.text((15,81), time_str, font=font, fill="white")
+                    draw.text((295,0), kda_str, font=bold_font, fill="white")
+                    draw.text((295,26), kda_ratio_str, font=font, fill=kda_color)
+                    draw.text((390,0), kp_str, font=font, fill="white")
+                    draw.text((390,26), cs_str, font=font, fill="white")
+                    draw.text((410,75), gold_str, font=font, fill="white")
+
+                    print("hi")
+                    buffer = BytesIO()
+                    tab_final.save(buffer, format="PNG")
+                    buffer.seek(0)
+
+                    filename = f"tab_{match_id}.png"
+                    final_file = discord.File(buffer, filename=filename)
+
+                    tab_embed = discord.Embed(
+                        title=f"Recent League match for {gameName}#{tagLine}",
+                        color=discord.Color.blue() if win else discord.Color.red()
+                    )
+                    tab_embed.set_image(url=f"attachment://{filename}")
+
+            return None, final_file, tab_embed, maxDamage, maxTaken, duration, blue_team, red_team, blue_win
 
     except Exception as err:
-        return f"Error fetching last match for {gameName}#{tagLine}: {err}",  None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return f"Error fetching last match for {gameName}#{tagLine}: {err}",  None, None, None, None, None, None, None, None
         
 # Get recent x matches
 async def recent_matches(gameName, tagLine, puuid, mode, mass_region, tft_token, num_matches):
@@ -988,14 +1086,14 @@ async def parse_args(ctx, args):
     
     if len(args) == 3: # <gameNum, username, tagline>
         if args[0].isdigit():
-            gameNum = int(args[0])
+            gameNum = int(args[0]) - 1 
             gameName, tagLine = args[1], args[2]
         else:
             return None, None, None, None, "Format should be <game #, username, tagline>"
         
     elif len(args) == 2 and args[1].startswith("<@"): # <gameNum, @mention>
         if args[0].isdigit():
-            gameNum = int(args[0])
+            gameNum = int(args[0]) - 1 
             user_id = args[1].strip("<@!>")
         else:
             return None, None, None, None, "Format should be <game #, @mention>"
@@ -1007,7 +1105,7 @@ async def parse_args(ctx, args):
         user_id = args[0].strip("<@!>")
 
     elif len(args) == 1 and args[0].isdigit(): # <gameNum>
-        gameNum = int(args[0])
+        gameNum = int(args[0]) - 1
         user_id = ctx.author.id
 
     elif len(args) == 0: # all defaults 

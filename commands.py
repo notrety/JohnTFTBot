@@ -349,9 +349,9 @@ class BotCommands(commands.Cog):
             "summs_mapping": self.summs_mapping            # summoner spell ID → icon path
         }
 
-        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
-        if not gameNum:
-            gameNum = 1
+        game_num, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        if not game_num:
+            game_num = 0
 
         if user_id:
             data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
@@ -363,95 +363,18 @@ class BotCommands(commands.Cog):
         if not puuid:
             print(f"Could not find PUUID for {gameName}#{tagLine}.")
             return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
-
-        # use last_match league command
-        err, duration, champ_id, cs, level, kills, deaths, assists, gold, win, keystone_id, rune_id, summ1_id, summ2_id, items, killparticipation, endstamp, match_id, max_damage, max_taken = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, region, gameNum, game_type)
-        
-        if err:
-            await ctx.send(err)
-
-        champ_path = helpers.get_lol_champ_icon(champ_id)
-        keystone_path = helpers.get_keystone_icon(self.keystone_mapping, keystone_id).lower()
-        runes_path = helpers.get_rune_icon(self.runes_mapping, rune_id).lower()
-        summ1_path = helpers.get_summs_icon(self.summs_mapping, summ1_id).lower()
-        summ2_path = helpers.get_summs_icon(self.summs_mapping, summ2_id).lower()
         background_color = (0,0,0,0)
 
-        tab_final = Image.new("RGBA", (500, 100), background_color)
+        error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
+        if error:
+            return error, None, None, None, None, None, None, None, None
 
-        champ_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (60,60))
-        keystone_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (30,30))
-        runes_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (20,20))
-        summ1_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (30,30))
-        summ2_image = await helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (30,30))
-        items_image = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_lol_item_icon(self.lol_item_mapping, item).lower()}" for item in items]
-        gold_image = await helpers.fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20))
-        fetch_tasks = [helpers.fetch_image(url, (30, 30)) for url in items_image]
-        item_icons = await asyncio.gather(*fetch_tasks)
+        match_id = match_ids[game_num]['match_id']
 
-        for i, item_icon in enumerate(item_icons):
-            tab_final.paste(item_icon, (170 + 30*i, 70), item_icon)
+        if not match_id:
+            return f"No recent {game_type} matches found for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None
 
-        tab_final.paste(champ_image, (170,0))
-        tab_final.paste(keystone_image, (260,0))
-        tab_final.paste(runes_image,(265,35))
-        tab_final.paste(summ1_image,(230,0))
-        tab_final.paste(summ2_image,(230,30))
-        tab_final.paste(gold_image, (390,75))
-        draw = ImageDraw.Draw(tab_final)
-
-        font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
-        bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
-
-        kda_str = f"{kills} / {deaths} / {assists}"
-        if deaths == 0:
-            kda_ratio_str = "Perfect"
-        else:
-            kda_ratio = (kills + assists) / deaths
-            kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
-        minutes, secs = divmod(duration, 60)
-        cspm = cs * 60 / duration
-        time_str = f"{minutes}m {secs}s"
-        kp_str = f"P/Kill {killparticipation:.0%}"
-        cs_str = f"CS {cs} ({cspm:.1f})"
-        gold_str = f" {gold:,}"
-
-        if win:
-            font_color = "#5485eb"
-        else:
-            font_color = "#e64253"
-
-        kda_color = "#8a8a8a"
-        if kda_ratio_str == "Perfect":
-            kda_color = "#f78324"
-        elif kda_ratio >= 5.00:
-            kda_color = "#f78324"
-        elif kda_ratio >= 4.00:
-            kda_color = "#188ae9"
-        elif kda_ratio >= 3.00:
-            kda_color = "#29b0a3"
-
-        end_str = helpers.time_ago(endstamp)
-
-        draw.text((15,0), f"{game_type}", font=bold_font, fill=font_color)
-        draw.text((15,23), end_str, font=font, fill="white")
-        draw.text((15,61), "Victory" if win else "Defeat", font=font, fill="white")
-        draw.text((15,81), time_str, font=font, fill="white")
-        draw.text((295,0), kda_str, font=bold_font, fill="white")
-        draw.text((295,26), kda_ratio_str, font=font, fill=kda_color)
-        draw.text((390,0), kp_str, font=font, fill="white")
-        draw.text((390,26), cs_str, font=font, fill="white")
-        draw.text((410,75), gold_str, font=font, fill="white")
-
-        tab_final.save("tab_example.png")
-        final_file = discord.File("tab_example.png", filename="tab_example.png")
-        tab_embed = discord.Embed(
-            title=f"Recent League match for {gameName}#{tagLine}",
-            color=discord.Color.blue() if win else discord.Color.red()
-        )
-
-        tab_embed.set_image(url="attachment://tab_example.png")
-
+        error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color)
         async def process_participant(participant, duration, mappings):
             items = []
             gameName = participant["riotIdGameName"]
@@ -470,6 +393,9 @@ class BotCommands(commands.Cog):
             killparticipation = participant.get("challenges", {}).get("killParticipation", 0)
             damagedealt = participant["totalDamageDealtToChampions"]
             damagetaken = participant["totalDamageTaken"]
+
+            font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
+            bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
 
             if participant["puuid"] == puuid:
                 strip = Image.new("RGBA", (600, 60), "#2F3136")
@@ -504,13 +430,14 @@ class BotCommands(commands.Cog):
                 helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (16,16)),
                 helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (25,25)),
                 helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25)),
+                helpers.fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20)),
             ]
             # Add item icons
             fetch_tasks.extend([helpers.fetch_image(url, (25,25)) for url in items_urls])
 
             # Gather all images concurrently
             images = await asyncio.gather(*fetch_tasks)
-            champ_image, keystone_image, runes_image, summ1_image, summ2_image, *item_icons = images
+            champ_image, keystone_image, runes_image, summ1_image, summ2_image, gold_image, *item_icons = images
 
             try: 
                 rank_info = await helpers.get_lol_rank_info(region, participant["puuid"], self.lol_token)
@@ -590,7 +517,7 @@ class BotCommands(commands.Cog):
                 x = center_x - text_w // 2
                 draw.text((x, y), text, font=font, fill=fill)
 
-                          
+            draw.rectangle([409,34,511,56], fill="black", outline=None)
             draw.rectangle(damage_coords, fill="#e94054", outline=None)
             draw.rectangle(damageFill_coords, fill="#2a2736", outline=None)
             draw.rectangle([45,35,65,55], fill="black", outline=None)
@@ -620,18 +547,8 @@ class BotCommands(commands.Cog):
 
             return team_img
         
-        async with RiotAPIClient(default_headers={"X-Riot-Token": self.lol_token}) as client:
-            match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
-
-        participants = match_info["info"]["participants"]
-
-        blue_team = [p for p in participants if p["teamId"] == 100]
-        red_team = [p for p in participants if p["teamId"] == 200]
-
         blue_img = await build_team_image(blue_team, duration, mappings)
         red_img = await build_team_image(red_team, duration, mappings)
-
-        blue_win = match_info["info"]["teams"][0]["win"] 
 
         # Now these are PIL Images → you can save them
         blue_img.save("blue_team.png")
@@ -686,6 +603,74 @@ class BotCommands(commands.Cog):
 
         # await ctx.send(files=[final_file], embeds=[tab_embed],view=ToggleTeamView(0))
         await ctx.send(files=[final_file,blue_file,red_file], embeds=[tab_embed, blue_embed, red_embed])
+
+    @commands.command(nmame="todayleague", aliases=["tl","lt"])
+    async def today_league(self, ctx, *args):
+        mappings = {
+            "lol_item_mapping": self.lol_item_mapping,     # item ID → icon path
+            "keystone_mapping": self.keystone_mapping,     # keystone ID → icon path
+            "runes_mapping": self.runes_mapping,           # rune ID → icon path
+            "summs_mapping": self.summs_mapping            # summoner spell ID → icon path
+        }
+        game_type = "Ranked Solo/Duo"
+        game_num, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
+        if not game_num:
+            game_num = 0
+
+        if user_id:
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        else:
+            region = self.region
+            mass_region = self.mass_region
+
+        puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
+        if not puuid:
+            print(f"Could not find PUUID for {gameName}#{tagLine}.")
+            return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+        background_color = (0,0,0,0)
+
+        error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
+        if error:
+            return error, None, None, None, None, None, None, None, None
+        
+        recent_matches = match_ids[-10:]  # assuming match_ids is already sorted oldest → newest
+
+        results = []
+        async with asyncio.TaskGroup() as tg:
+            for match in recent_matches:
+                match_id = match["match_id"]
+
+                print(match_id)
+                tg.create_task(
+                    helpers.league_last_match(
+                        gameName, tagLine, mass_region, self.lol_token,
+                        puuid, match_id, game_type, mappings, background_color
+                    )
+                )
+
+            # Once the group finishes, collect results
+            # tg.tasks holds all tasks in the group
+            for task in tg.tasks:
+                print("finished one")
+                results.append(await task)
+        embeds = []
+        files = []
+        for res in results:
+            error, final_file, tab_embed, *_ = res
+            if error:
+                await ctx.send(error)
+                continue
+            if tab_embed:
+                embeds.append(tab_embed)
+            if final_file:
+                files.append(final_file)
+
+        # Send all at once
+        if embeds or files:
+            await ctx.send(files=files, embeds=embeds)
+        else:
+            await ctx.send("No valid matches to display.")
+
 
     # Redirect user to /link
     @commands.command()
