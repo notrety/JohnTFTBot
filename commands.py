@@ -441,7 +441,8 @@ class BotCommands(commands.Cog):
             champ_image, keystone_image, runes_image, summ1_image, summ2_image, gold_image, *item_icons = images
 
             try: 
-                rank_info = await helpers.get_lol_rank_info(region, participant["puuid"], self.lol_token)
+                async with aiohttp.ClientSession() as session:
+                    rank_info = await helpers.get_lol_rank_info(region, participant["puuid"], self.lol_token, session)
             except Exception as err:
                 return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
         
