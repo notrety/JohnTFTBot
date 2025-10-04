@@ -235,21 +235,25 @@ async def get_rank_info(region, puuid, tft_token, session):
             print(f"Error fetching rank info: {response.status}")
             return None
 
-async def get_lol_rank_info(region, puuid, lol_token):
+async def get_lol_rank_info(region, puuid, lol_token, session):
     url = f"https://{region}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
     headers = {"X-Riot-Token": lol_token}
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                try:
-                    return await response.json()
-                except Exception as e:
-                    print(f"JSON decode error: {e}")
-                    return None
-            else:
-                print(f"Error fetching rank info: {response.status}")
+    async with session.get(url, headers=headers) as response:
+        if response.status == 200:
+            try:
+                return await response.json()
+            except Exception as e:
+                print(f"JSON decode error: {e}")
                 return None
+        elif response.status == 429:
+            retry_after = int(response.headers.get("Retry-After", "1"))
+            print(f"Rate limited for {puuid}, retrying in {retry_after}s")
+            await asyncio.sleep(retry_after)
+            return await get_lol_rank_info(region, puuid, lol_token, session)  # retry internally
+        else:
+            print(f"Error fetching rank info: {response.status}")
+            return None
 
 # Function to return cutoff lp for challenger and grandmaster
 async def get_cutoff(tft_token, region):
@@ -439,7 +443,31 @@ async def calculate_elo(puuid, tft_token, region, session):
                 attempts += 1
             else:
                 raise e  # Re-raise other errors
-            
+
+async def lol_calculate_elo(puuid, lol_token, region, session):
+    attempts = 0
+
+    while True:
+        try:
+            # Fetch summoner data
+            rank_info = await get_lol_rank_info(region, puuid, lol_token, session)
+
+            # Find Ranked League entry
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_SOLO_5x5':
+                    return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
+            return 0, "UNRANKED", "", 0  # If no ranked League entry is found
+
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                retry_after = int(e.response.headers.get("Retry-After", 5))  # Get wait time
+                wait_time = min(5 * (2 ** attempts), 60)  # Exponential backoff (max 60s)
+                print(f"Rate limited! Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                attempts += 1
+            else:
+                raise e  # Re-raise other errors
+
 def time_ago(game_end_ts):
     # Convert from ms → seconds
     game_end_seconds = game_end_ts / 1000
@@ -500,7 +528,7 @@ async def get_rank_embed(name, tagLine, region, tft_token, puuid):
                 embed.set_author(
                     name=f"TFT Stats for {gameName}#{tagLine}",
                     url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set15",
-                    icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
+                    icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/6/67/Teamfight_Tactics_icon.png/revision/latest/scale-to-width/360?cb=20191018215638"
                 )
 
                 return embed, None  # Return the embed
@@ -511,7 +539,8 @@ async def get_rank_embed(name, tagLine, region, tft_token, puuid):
 async def get_lol_rank_embed(name, tagLine, region, lol_token, puuid):
     gameName = name.replace("_", " ")
     try: 
-        rank_info = await get_lol_rank_info(region, puuid, lol_token)
+        async with aiohttp.ClientSession() as session:
+            rank_info = await get_lol_rank_info(region, puuid, lol_token, session)
     except Exception as err:
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
     if rank_info:
@@ -536,7 +565,7 @@ async def get_lol_rank_embed(name, tagLine, region, lol_token, puuid):
                 embed.set_author(
                     name=f"LOL Stats for {gameName}#{tagLine}",
                     url=f"https://op.gg/lol/summoners/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}",
-                    icon_url="https://play-lh.googleusercontent.com/FeRWKSHpYNEW21xZCQ-Y4AkKAaKVqLIy__PxmiE_kGN1uRh7eiB87ZFlp3j1DRp9r8k=w240-h480-rw"
+                    icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250?cb=20191029062637"
                 )
 
                 return embed, None  # Return the embed

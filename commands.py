@@ -809,6 +809,93 @@ class BotCommands(commands.Cog):
 
         await ctx.send(embed=lb_embed)
 
+    @commands.command(name="leaguelb", aliases=["leagueleaderboard", "lserver", "lserverlb", "llb"])
+    async def leaguelb(self, ctx):
+        _, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
+        result = ""
+        server = False
+        if ctx.guild and ctx.invoked_with in {"lserver", "lserverlb"}:
+            guild = ctx.guild
+            members = {member.id async for member in guild.fetch_members(limit=None)}
+            server = True
+        else:
+            members = set()
+
+        all_users = self.collection.find()
+        
+        # Create a list to store all users' elo and name
+        user_elo_and_name = []
+
+        async def process_user(user, session):
+            if server:
+                if not int(user['discord_id']) in members:
+                    return
+            try:
+                puuid = await helpers.get_puuid(user['name'], user['tag'], user['mass_region'], self.lol_token)
+                user_elo, user_tier, user_rank, user_lp = await helpers.lol_calculate_elo(
+                    puuid, self.lol_token, user['region'], session
+                )
+                name_and_tag = f"{user['name']}#{user['tag']}"
+                user_elo_and_name.append(
+                    (user_elo, user_tier, user_rank, user_lp, name_and_tag, user['region'])
+                )
+            except Exception as e:
+                await ctx.send(f"Error processing {user['name']}#{user['tag']}: {e}")
+
+        async with aiohttp.ClientSession() as session:
+            async with RiotAPIClient(default_headers={"X-Riot-Token": self.lol_token}) as client:
+                async with asyncio.TaskGroup() as tg:
+                    for user in all_users:
+                        tg.create_task(process_user(user, session))
+            
+        # Sort users by their elo score (assuming user_elo is a numeric value)
+        user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
+
+        # Prepare the leaderboard result
+        for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, region) in enumerate(user_elo_and_name):
+            name, tag = name_and_tag.split("#")
+            icon = dicts.tier_to_rank_icon[user_tier]
+            if user_tier != "UNRANKED":
+                if name == gameName and tag == tagLine:
+                    result += (
+                        f"**{index + 1}** - "
+                        f"**[__{name_and_tag}__]"
+                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
+                        f": {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+                    )
+                else:
+                    result += (
+                        f"**{index + 1}** - "
+                        f"[{name_and_tag}]"
+                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
+                        f": {icon} {user_tier} {user_rank} • {user_lp} LP\n"
+                    )
+            else:
+                if name == gameName and tag == tagLine:
+                    result += (
+                        f"**{index + 1}** - "
+                        f"**[__{name_and_tag}__]"
+                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
+                        f": {icon} {user_tier} {user_rank}**\n"
+                    )
+                else:
+                    result += (
+                        f"**{index + 1}** - "
+                        f"[{name_and_tag}]"
+                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
+                        f": {icon} {user_tier} {user_rank}\n"
+                    )
+
+        lb_embed = discord.Embed(
+            title="Overall Bot Ranked Leaderboard",
+            description=result,
+            color=discord.Color.blue()
+        )
+
+        await ctx.send(embed=lb_embed)
+
+
+
     # Commnad to check the lp cutoff for challenger and grandmaster
     @commands.command(name="cutoff", aliases=["cutoffs", "challenger", "grandmaster", "grandmasters", "lpcutoff", "chall", "gm"])
     async def cutoff(self, ctx):
