@@ -64,9 +64,11 @@ class BotCommands(commands.Cog):
     async def leagueStats(self, ctx, *args):
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         if user_id:
-                data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-        region = self.region
-        mass_region = self.mass_region
+            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+        else: 
+            region = self.region
+            mass_region = self.mass_region
+            
         puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
         if not puuid:
             print(f"Could not find PUUID for {gameName}#{tagLine}.")
