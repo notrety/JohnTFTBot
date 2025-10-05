@@ -763,7 +763,7 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                         fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (20,20)),
                         fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (30,30)),
                         fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (30,30)),
-                        fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (25,25)),
+                        fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20)),
                     ]
                     # Add item icons
                     fetch_tasks.extend([fetch_image(url, (30,30)) for url in items_urls])
