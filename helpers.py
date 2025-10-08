@@ -729,14 +729,13 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
             red_team = [p for p in participants if p["teamId"] == 200]
 
             blue_win = match_info["info"]["teams"][0]["win"]
-
+            remake = False
             for participant in participants:
                 maxDamage = max(participant["totalDamageDealtToChampions"],maxDamage)
                 maxTaken = max(participant["totalDamageTaken"],maxTaken)
-                
                 if participant["gameEndedInEarlySurrender"] == True:
-                    # In case of remake
-                    return "This game was a remake", None, None, None, None
+                    remake = True
+
                 if participant["puuid"] == puuid:
                     cs = participant["totalMinionsKilled"] + participant["neutralMinionsKilled"]
                     level = participant["champLevel"]
@@ -803,6 +802,9 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     else:
                         font_color = "#e64253"
 
+                    if remake:
+                        font_color = "#8a8a8a"
+
                     kda_color = "#8a8a8a"
                     if kda_ratio_str == "Perfect":
                         kda_color = "#f78324"
@@ -813,11 +815,18 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     elif kda_ratio >= 3.00:
                         kda_color = "#29b0a3"
 
+                    if win:
+                        result_str = "Victory"
+                    elif remake:
+                        result_str = "Remake"
+                    else:
+                        result_str = "Defeat"
+
                     end_str = time_ago(endstamp)
 
                     draw.text((15,0), f"{mode}", font=bold_font, fill=font_color)
                     draw.text((15,23), end_str, font=font, fill="white")
-                    draw.text((15,61), "Victory" if win else "Defeat", font=font, fill="white")
+                    draw.text((15,61), result_str, font=font, fill="white")
                     draw.text((15,81), time_str, font=font, fill="white")
                     draw.text((295,0), kda_str, font=bold_font, fill="white")
                     draw.text((295,26), kda_ratio_str, font=font, fill=kda_color)
@@ -834,8 +843,9 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
 
                     tab_embed = discord.Embed(
                         title=f"Recent League match for {gameName}#{tagLine}"if header else None,
-                        color=discord.Color.blue() if win else discord.Color.red()
+                        color=int(font_color.strip("#"), 16)
                     )
+
                     tab_embed.set_image(url=f"attachment://{filename}")
 
             return None, final_file, tab_embed, maxDamage, maxTaken, duration, blue_team, red_team, blue_win
