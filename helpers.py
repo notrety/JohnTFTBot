@@ -22,6 +22,7 @@ async def get_all_set_placements(collection, mass_region, tft_token):
     tasks = [process_player(player, collection, mass_region, tft_token) for player in players]
     await asyncio.gather(*tasks)
 
+
 async def process_player(player_doc, collection, mass_region, tft_token):
     puuid = player_doc["puuid"]
     mass_region = player_doc["mass_region"]
@@ -833,7 +834,8 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     draw.text((390,0), kp_str, font=font, fill="white")
                     draw.text((390,26), cs_str, font=font, fill="white")
                     draw.text((410,75), gold_str, font=font, fill="white")
-
+                    draw.rectangle([210,40,228,60], fill="black", outline=None)
+                    draw_centered(draw, str(participant["champLevel"]), font, 220, y=40, fill="white")
                     buffer = BytesIO()
                     tab_final.save(buffer, format="PNG")
                     buffer.seek(0)
@@ -1156,3 +1158,10 @@ async def parse_args(ctx, args):
         )
 
     return gameNum, gameName, tagLine, user_id, None
+
+def draw_centered(draw, text, font, center_x, y, fill="white"):
+    bbox = font.getbbox(text)
+    text_w = bbox[2] - bbox[0]
+    # left x so that text's midpoint sits on center_x
+    x = center_x - text_w // 2
+    draw.text((x, y), text, font=font, fill=fill)

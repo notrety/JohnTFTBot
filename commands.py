@@ -512,15 +512,7 @@ class BotCommands(commands.Cog):
                 x + text_w + padding_x, 
                 28
             ]
-
-
-            def draw_centered(draw, text, font, center_x, y, fill="white"):
-                bbox = font.getbbox(text)
-                text_w = bbox[2] - bbox[0]
-                # left x so that text's midpoint sits on center_x
-                x = center_x - text_w // 2
-                draw.text((x, y), text, font=font, fill=fill)
-
+            
             draw.rectangle([409,34,511,56], fill="black", outline=None)
             draw.rectangle(damage_coords, fill="#e94054", outline=None)
             draw.rectangle(damageFill_coords, fill="#2a2736", outline=None)
@@ -533,9 +525,9 @@ class BotCommands(commands.Cog):
             draw.text((125 + width1, 30), kda_ratio_str, font=bold_font, fill=kda_color)
             draw.text((535,35),participant_gold_str, font=damage_font, fill="white")
 
-            draw_centered(draw, cs_str, damage_font, 360, y=10, fill="white")
-            draw_centered(draw, cspm_str, damage_font, 360, y=30, fill="white")
-            draw_centered(draw, str(participant["champLevel"]), damage_font, 55, y=35, fill="white")
+            helpers.draw_centered(draw, cs_str, damage_font, 360, y=10, fill="white")
+            helpers.draw_centered(draw, cspm_str, damage_font, 360, y=30, fill="white")
+            helpers.draw_centered(draw, str(participant["champLevel"]), damage_font, 55, y=35, fill="white")
 
             return strip
 
