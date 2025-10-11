@@ -74,7 +74,6 @@ if response.status_code == 200:
 else:
     print("Failed to fetch data")
 
-
 response = requests.get(companion_json_url)
 if response.status_code == 200:
     companion_mapping = response.json()  # Assuming data is a dictionary

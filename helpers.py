@@ -1,5 +1,3 @@
-# File containing all helper functions for commands
-import aiohttp
 import asyncio
 from collections import Counter
 import discord
@@ -146,8 +144,7 @@ async def daily_store_stats(collection, tft_token):
         games = user.get('games')
         mass_region = user.get('mass_region')
         placement_counts = user.get('placement_counts')
-        async with aiohttp.ClientSession() as session:
-            rank_info = await get_rank_info(region, puuid, tft_token, session)
+        rank_info = await get_rank_info(region, puuid, tft_token)
         print(rank_info)
         if not rank_info:
             today_games = 0
@@ -217,44 +214,15 @@ async def daily_store_stats(collection, tft_token):
                 )
         
 # Update after pulsefire adds endpoint for league_v1_by_puuid
-async def get_rank_info(region, puuid, tft_token, session):
-    url = f"https://{region}.api.riotgames.com/tft/league/v1/by-puuid/{puuid}"
-    headers = {"X-Riot-Token": tft_token}
-    async with session.get(url, headers=headers) as response:
-        if response.status == 200:
-            try:
-                return await response.json()
-            except Exception as e:
-                print(f"JSON decode error: {e}")
-                return None
-        elif response.status == 429:
-            retry_after = int(response.headers.get("Retry-After", "1"))
-            print(f"Rate limited for {puuid}, retrying in {retry_after}s")
-            await asyncio.sleep(retry_after)
-            return await get_rank_info(region, puuid, tft_token, session)  # retry internally
-        else:
-            print(f"Error fetching rank info: {response.status}")
-            return None
+async def get_rank_info(region, puuid, tft_token):
+    async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
+        info = await client.get_tft_league_v1_entries_by_puuid(region=region, puuid=puuid)
+        return info
 
-async def get_lol_rank_info(region, puuid, lol_token, session):
-    url = f"https://{region}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
-    headers = {"X-Riot-Token": lol_token}
-
-    async with session.get(url, headers=headers) as response:
-        if response.status == 200:
-            try:
-                return await response.json()
-            except Exception as e:
-                print(f"JSON decode error: {e}")
-                return None
-        elif response.status == 429:
-            retry_after = int(response.headers.get("Retry-After", "1"))
-            print(f"Rate limited for {puuid}, retrying in {retry_after}s")
-            await asyncio.sleep(retry_after)
-            return await get_lol_rank_info(region, puuid, lol_token, session)  # retry internally
-        else:
-            print(f"Error fetching rank info: {response.status}")
-            return None
+async def get_lol_rank_info(region, puuid, lol_token):
+    async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
+        info = await client.get_lol_league_v4_entries_by_puuid(region=region, puuid=puuid)
+        return info
 
 # Function to return cutoff lp for challenger and grandmaster
 async def get_cutoff(tft_token, region):
@@ -421,13 +389,13 @@ async def get_last_game_companion(name, tagLine, mass_region, tft_token):
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
 # Function to calculate ranked elo based on given PUUID
-async def calculate_elo(puuid, tft_token, region, session):
+async def calculate_elo(puuid, tft_token, region):
     attempts = 0
 
     while True:
         try:
             # Fetch summoner data
-            rank_info = await get_rank_info(region, puuid, tft_token, session)
+            rank_info = await get_rank_info(region, puuid, tft_token)
 
             # Find Ranked TFT entry
             for entry in rank_info:
@@ -445,13 +413,13 @@ async def calculate_elo(puuid, tft_token, region, session):
             else:
                 raise e  # Re-raise other errors
 
-async def lol_calculate_elo(puuid, lol_token, region, session):
+async def lol_calculate_elo(puuid, lol_token, region):
     attempts = 0
 
     while True:
         try:
             # Fetch summoner data
-            rank_info = await get_lol_rank_info(region, puuid, lol_token, session)
+            rank_info = await get_lol_rank_info(region, puuid, lol_token)
 
             # Find Ranked League entry
             for entry in rank_info:
@@ -503,8 +471,7 @@ def time_ago(game_end_ts):
 async def get_rank_embed(name, tagLine, region, tft_token, puuid):
     gameName = name.replace("_", " ")
     try: 
-        async with aiohttp.ClientSession() as session:
-            rank_info = await get_rank_info(region, puuid, tft_token, session)
+        rank_info = await get_rank_info(region, puuid, tft_token)
     except Exception as err:
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
     if rank_info:
@@ -540,8 +507,7 @@ async def get_rank_embed(name, tagLine, region, tft_token, puuid):
 async def get_lol_rank_embed(name, tagLine, region, lol_token, puuid):
     gameName = name.replace("_", " ")
     try: 
-        async with aiohttp.ClientSession() as session:
-            rank_info = await get_lol_rank_info(region, puuid, lol_token, session)
+        rank_info = await get_lol_rank_info(region, puuid, lol_token)
     except Exception as err:
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
     if rank_info:
@@ -660,10 +626,9 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
             timestamp = match_info['info']['game_datetime'] / 1000
             formatted_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
             time_and_time_ago = formatted_time + ", " + time_ago(timestamp)
-            async with aiohttp.ClientSession() as session:
-                riot_ids_tasks = [client.get_account_v1_by_puuid(region=mass_region, puuid=p['puuid']) for p in participants]
-                rank_info_tasks = [get_rank_info(region, p['puuid'], tft_token, session) for p in participants]
-                riot_ids, ranks = await asyncio.gather(asyncio.gather(*riot_ids_tasks), asyncio.gather(*rank_info_tasks))
+            riot_ids_tasks = [client.get_account_v1_by_puuid(region=mass_region, puuid=p['puuid']) for p in participants]
+            rank_info_tasks = [get_rank_info(region, p['puuid'], tft_token) for p in participants]
+            riot_ids, ranks = await asyncio.gather(asyncio.gather(*riot_ids_tasks), asyncio.gather(*rank_info_tasks))
 
             players_data = []
             player_elos = 0

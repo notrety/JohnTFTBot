@@ -4,7 +4,6 @@ import dicts
 import asyncio
 import random
 import os
-import aiohttp
 import matplotlib.pyplot as plt
 from collections import Counter
 from discord.ui import View
@@ -443,8 +442,7 @@ class BotCommands(commands.Cog):
             champ_image, keystone_image, runes_image, summ1_image, summ2_image, gold_image, *item_icons = images
 
             try: 
-                async with aiohttp.ClientSession() as session:
-                    rank_info = await helpers.get_lol_rank_info(region, participant["puuid"], self.lol_token, session)
+                rank_info = await helpers.get_lol_rank_info(region, participant["puuid"], self.lol_token)
             except Exception as err:
                 return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
         
@@ -640,13 +638,13 @@ class BotCommands(commands.Cog):
         recent_matches = recent_matches[-10:]
 
         results = []
-        async with asyncio.TaskGroup() as tg:
+        async with TaskGroup(asyncio.Semaphore(20)) as tg:
             tasks = []
             for match in recent_matches:
                 match_id = match["match_id"]
                 print(match_id)
 
-                task = tg.create_task(
+                task = await tg.create_task(
                     helpers.league_last_match(
                         gameName, tagLine, mass_region, self.lol_token,
                         puuid, match_id, game_type, mappings, background_color, False
@@ -757,13 +755,15 @@ class BotCommands(commands.Cog):
         # Create a list to store all users' elo and name
         user_elo_and_name = []
 
-        async def process_user(user, session):
+        async def process_user(user):
+
+            print(f"processing {user['name']}")
             if server:
                 if not int(user['discord_id']) in members:
                     return
             try:
                 user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(
-                    user['puuid'], self.tft_token, user['region'], session
+                    user['puuid'], self.tft_token, user['region']
                 )
                 name_and_tag = f"{user['name']}#{user['tag']}"
                 user_elo_and_name.append(
@@ -772,11 +772,9 @@ class BotCommands(commands.Cog):
             except Exception as e:
                 await ctx.send(f"Error processing {user['name']}#{user['tag']}: {e}")
 
-        async with aiohttp.ClientSession() as session:
-            async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
-                async with asyncio.TaskGroup() as tg:
-                    for user in all_users:
-                        tg.create_task(process_user(user, session))
+        async with TaskGroup(asyncio.Semaphore(20)) as tg:
+            for user in all_users:
+                await tg.create_task(process_user(user))
             
         # Sort users by their elo score (assuming user_elo is a numeric value)
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
@@ -817,69 +815,51 @@ class BotCommands(commands.Cog):
             members = set()
 
         all_users = self.collection.find()
-        
-        # Create a list to store all users' elo and name
         user_elo_and_name = []
 
-        async def process_user(user, session):
-            if server:
-                if not int(user['discord_id']) in members:
-                    return
+        async def process_user(user):
+            if server and int(user["discord_id"]) not in members:
+                return
+
             try:
-                puuid = await helpers.get_puuid(user['name'], user['tag'], user['mass_region'], self.lol_token)
+                # Fetch puuid (still using your helper)
+                puuid = await helpers.get_puuid(user["name"], user["tag"], user["mass_region"], self.lol_token)
+
+                # Make Riot API call via Pulsefire client; rate limiting handled automatically
                 user_elo, user_tier, user_rank, user_lp = await helpers.lol_calculate_elo(
-                    puuid, self.lol_token, user['region'], session
-                )
+                    puuid, self.lol_token, user["region"])
+
                 name_and_tag = f"{user['name']}#{user['tag']}"
                 user_elo_and_name.append(
-                    (user_elo, user_tier, user_rank, user_lp, name_and_tag, user['region'])
+                    (user_elo, user_tier, user_rank, user_lp, name_and_tag, user["region"])
                 )
+
             except Exception as e:
                 await ctx.send(f"Error processing {user['name']}#{user['tag']}: {e}")
 
-        async with aiohttp.ClientSession() as session:
-            async with RiotAPIClient(default_headers={"X-Riot-Token": self.lol_token}) as client:
-                async with asyncio.TaskGroup() as tg:
-                    for user in all_users:
-                        tg.create_task(process_user(user, session))
-            
-        # Sort users by their elo score (assuming user_elo is a numeric value)
-        user_elo_and_name.sort(reverse=True, key=lambda x: x[0])  # Sort in descending order
+        async with TaskGroup() as tg:
+            for user in all_users:
+                await tg.create_task(process_user(user))
 
-        # Prepare the leaderboard result
+        # Sort users by elo descending
+        user_elo_and_name.sort(reverse=True, key=lambda x: x[0])
+
+        # Build leaderboard embed
         for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, region) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
             icon = dicts.tier_to_rank_icon[user_tier]
+
+            profile_url = f"https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag}"
             if user_tier != "UNRANKED":
-                if name == gameName and tag == tagLine:
-                    result += (
-                        f"**{index + 1}** - "
-                        f"**[__{name_and_tag}__]"
-                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
-                        f": {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
-                    )
-                else:
-                    result += (
-                        f"**{index + 1}** - "
-                        f"[{name_and_tag}]"
-                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
-                        f": {icon} {user_tier} {user_rank} • {user_lp} LP\n"
-                    )
+                text = f"{icon} {user_tier} {user_rank} • {user_lp} LP"
             else:
-                if name == gameName and tag == tagLine:
-                    result += (
-                        f"**{index + 1}** - "
-                        f"**[__{name_and_tag}__]"
-                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
-                        f": {icon} {user_tier} {user_rank}**\n"
-                    )
-                else:
-                    result += (
-                        f"**{index + 1}** - "
-                        f"[{name_and_tag}]"
-                        f"(https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag})"
-                        f": {icon} {user_tier} {user_rank}\n"
-                    )
+                text = f"{icon} {user_tier} {user_rank}"
+
+            # Highlight command user
+            if name == gameName and tag == tagLine:
+                result += f"**{index + 1}** - **[__{name_and_tag}__]({profile_url}): {text}**\n"
+            else:
+                result += f"**{index + 1}** - [{name_and_tag}]({profile_url}): {text}\n"
 
         lb_embed = discord.Embed(
             title="Overall Bot Ranked Leaderboard",
@@ -888,8 +868,6 @@ class BotCommands(commands.Cog):
         )
 
         await ctx.send(embed=lb_embed)
-
-
 
     # Commnad to check the lp cutoff for challenger and grandmaster
     @commands.command(name="cutoff", aliases=["cutoffs", "challenger", "grandmaster", "grandmasters", "lpcutoff", "chall", "gm"])
@@ -1050,8 +1028,7 @@ class BotCommands(commands.Cog):
 
             if not puuid:
                 text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
-                async with aiohttp.ClientSession() as session:
-                    rank_info = await helpers.get_rank_info(region, puuid, self.tft_token, session)
+            rank_info = await helpers.get_rank_info(region, puuid, self.tft_token)
             db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
             if not db_user_data:
                 text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
@@ -1158,14 +1135,12 @@ class BotCommands(commands.Cog):
             p2_gameName = p2_name.replace("_", " ")
             failedFetch = False
             try:
-                async with aiohttp.ClientSession() as session:
-                    p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.tft_token, session)
+                p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.tft_token)
             except Exception as err:
                 error_message = f"Error fetching rank info for {p1_gameName}#{p1_tag}: {err}. "
                 failedFetch = True
             try:
-                async with aiohttp.ClientSession() as session:
-                    p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.tft_token, session)
+                p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.tft_token)
             except Exception as err:
                 error_message += f"Error fetching rank info for {p2_gameName}#{p2_tag}: {err}."
                 failedFetch = True
