@@ -20,7 +20,6 @@ async def get_all_set_placements(collection, mass_region, tft_token):
     tasks = [process_player(player, collection, mass_region, tft_token) for player in players]
     await asyncio.gather(*tasks)
 
-
 async def process_player(player_doc, collection, mass_region, tft_token):
     puuid = player_doc["puuid"]
     mass_region = player_doc["mass_region"]
@@ -915,28 +914,17 @@ def check_data_name_tag(name, tag, collection):
 
 
 # Command to get trait icon with texture 
-def trait_image(trait_name: str, style: int, trait_icon_mapping):
+async def trait_image(trait_name: str, style: int, trait_icon_mapping):
     try:
         # Download the trait texture  
         texture_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/{dicts.style_to_texture.get(style, 'default_texture')}.png"
-        texture_response = requests.get(texture_url)
-
-        if texture_response.status_code != 200:
-            print(f"Failed to fetch texture from {texture_url}, Status Code: {texture_response.status_code}")
-            return None
-
-        texture = Image.open(BytesIO(texture_response.content))
+        texture = await fetch_image(texture_url)
 
         # Download the trait icon
         icon_path = get_trait_icon(trait_icon_mapping, trait_name).lower()
         icon_url = f"https://raw.communitydragon.org/latest/game/{icon_path}.png"
 
-        icon_response = requests.get(icon_url)
-        if icon_response.status_code != 200:
-            print(f"Failed to fetch icon from {icon_url}, Status Code: {icon_response.status_code}")
-            return None
-
-        icon = Image.open(BytesIO(icon_response.content))
+        icon = await fetch_image(icon_url)
 
         # Convert white parts of the icon to black for better visibility
         icon = icon.convert("RGBA")

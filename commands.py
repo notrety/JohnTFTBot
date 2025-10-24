@@ -142,17 +142,21 @@ class BotCommands(commands.Cog):
             filtered_traits = [trait for trait in traits if trait['style'] >= 1]
             sorted_traits = sorted(filtered_traits, key=lambda x: dicts.style_order.get(x['style'], 5))
             num_traits = len(sorted_traits)
+            if num_traits == 0:
+                trait_img_width = 0
+            else:
+                trait_img_width = int(min((590 / num_traits), 60))
 
-            trait_img_width = 89 * num_traits
-            trait_img_height = 103
-            trait_final_image = Image.new("RGBA", (trait_img_width, trait_img_height), (0, 0, 0, 0))
+            trait_img_height = 70
+            trait_final_image = Image.new("RGBA", (600, trait_img_height), (0, 0, 0, 0))
 
             async def process_trait(trait, i):
-                temp_image = await asyncio.to_thread(helpers.trait_image, trait['name'], trait['style'], self.trait_icon_mapping)
+                temp_image = await helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
                 if temp_image:
                     temp_image = temp_image.convert("RGBA")
+                    temp_image.thumbnail((trait_img_width, int(trait_img_width*1.16)))
                     mask = temp_image.split()[3]
-                    trait_final_image.paste(temp_image, (89 * i, 0), mask)
+                    trait_final_image.paste(temp_image, (trait_img_width * i, 0), mask)
 
             # Fetch trait images concurrently
             await asyncio.gather(*[process_trait(trait, i) for i, trait in enumerate(sorted_traits)])
@@ -161,20 +165,27 @@ class BotCommands(commands.Cog):
             units = participant.get('units', [])
             champ_unit_data_unsorted = []
 
+            # Calculate total champion image width
+            champ_img_width = int(min(600 / len(units), 60)) if units else 60
+            rarity_width = int(champ_img_width * 1.125)
+            champ_img_height = 115
+            champ_final_image = Image.new("RGBA", (600, champ_img_height), (0, 0, 0, 0))
+
             async def process_unit(unit):
                 champion_name = unit["character_id"]
                 tier = unit["tier"]
                 rarity = unit["rarity"]
                 item_names = unit["itemNames"]
 
+                print(champion_name)
                 custom_rarity = dicts.rarity_map.get(rarity, rarity)
                 champ_icon_path = helpers.get_champ_icon(self.champ_mapping, champion_name).lower()
                 rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
 
                 if champ_icon_path:
                     champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
-                    champ_task = helpers.fetch_image(champion_url, (64, 64))
-                    rarity_task = helpers.fetch_image(rarity_url, (72, 72))
+                    champ_task = helpers.fetch_image(champion_url, (champ_img_width, champ_img_width))
+                    rarity_task = helpers.fetch_image(rarity_url, (rarity_width, rarity_width))
                     
                     icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
 
@@ -184,44 +195,37 @@ class BotCommands(commands.Cog):
                         "rarity_resized": rarity_resized,
                         "rarity": rarity,
                         "tier": tier,
-                        "item_names": item_names,
-                        "width": 72  # Store individual width
+                        "item_names": item_names
                     })
 
             # Fetch all champion icons & rarity images concurrently
             await asyncio.gather(*[process_unit(unit) for unit in units])
             champ_unit_data = sorted(champ_unit_data_unsorted, key=lambda x: x['rarity'])
 
-            # Calculate total champion image width
-            champ_img_width = sum(unit['width'] for unit in champ_unit_data)
-            champ_img_height = 140
-            champ_final_image = Image.new("RGBA", (champ_img_width, champ_img_height), (0, 0, 0, 0))
-
             # --- Paste Champions & Items ---
             async def paste_champion(unit, current_x):
                 
-                champ_final_image.paste(unit["rarity_resized"], (current_x, 25), unit["rarity_resized"])
-                champ_final_image.paste(unit["icon_resized"], (current_x + 4, 29), unit["icon_resized"])
+                champ_final_image.paste(unit["rarity_resized"], (int(current_x), int(rarity_width/3 + 1)), unit["rarity_resized"])
+                champ_final_image.paste(unit["icon_resized"], (int(current_x + 4), int(rarity_width/3 + 5)), unit["icon_resized"])
 
                 if unit["tier"] in {2, 3}:
                     tier_icon_path = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{unit['tier']}.png"
-                    tier_resized = await helpers.fetch_image(tier_icon_path, (72, 36))
+                    tier_resized = await helpers.fetch_image(tier_icon_path, (rarity_width, int(rarity_width / 2)))
                     champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
 
                 item_urls = [f"https://raw.communitydragon.org/latest/game/{helpers.get_item_icon(self.item_mapping, item).lower()}" for item in unit["item_names"]]
 
-                fetch_tasks = [helpers.fetch_image(url, (23, 23)) for url in item_urls]
+                fetch_tasks = [helpers.fetch_image(url, (int(rarity_width/3 - 1), int(rarity_width/3 - 1))) for url in item_urls]
                 item_icons = await asyncio.gather(*fetch_tasks)
 
                 for i, item_icon in enumerate(item_icons):
-                    champ_final_image.paste(item_icon, (current_x + 23 * i, 97), item_icon)
+                    champ_final_image.paste(item_icon, (int(current_x + (rarity_width/3 - 1) * i), int(4 * rarity_width/3 + 1)), item_icon)
 
             # Process and paste champions concurrently
-            await asyncio.gather(*[paste_champion(unit, x) for unit, x in zip(champ_unit_data, range(0, champ_img_width, 72))])
+            await asyncio.gather(*[paste_champion(unit, i * rarity_width) for i, unit in enumerate(champ_unit_data)])
 
             # --- Combine Images ---
-            final_img_height = trait_img_height + champ_img_height
-            final_combined_image = Image.new("RGBA", (max(trait_img_width, champ_img_width), final_img_height), (0, 0, 0, 0))
+            final_combined_image = Image.new("RGBA", (600, 185), (0, 0, 0, 0))
             final_combined_image.paste(trait_final_image, (0, 0), trait_final_image)
             final_combined_image.paste(champ_final_image, (0, trait_img_height), champ_final_image)
 
