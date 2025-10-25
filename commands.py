@@ -142,13 +142,17 @@ class BotCommands(commands.Cog):
             filtered_traits = [trait for trait in traits if trait['style'] >= 1]
             sorted_traits = sorted(filtered_traits, key=lambda x: dicts.style_order.get(x['style'], 5))
             num_traits = len(sorted_traits)
-            if num_traits == 0:
-                trait_img_width = 0
-            else:
-                trait_img_width = int(min((590 / num_traits), 60))
+            if num_traits <= 5:
+                start_y = 21
+            elif num_traits <= 9:
+                start_y = 10
+            else: 
+                start_y = 0
 
-            trait_img_height = 70
-            trait_final_image = Image.new("RGBA", (600, trait_img_height), (0, 0, 0, 0))
+            trait_img_width = 56
+            trait_img_height = 150
+            trait_final_width = 310
+            trait_final_image = Image.new("RGBA", (trait_final_width, trait_img_height), (0, 0, 0, 0))
 
             async def process_trait(trait, i):
                 temp_image = await helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
@@ -156,20 +160,79 @@ class BotCommands(commands.Cog):
                     temp_image = temp_image.convert("RGBA")
                     temp_image.thumbnail((trait_img_width, int(trait_img_width*1.16)))
                     mask = temp_image.split()[3]
-                    trait_final_image.paste(temp_image, (trait_img_width * i, 0), mask)
+                    if i < 5:
+                        trait_final_image.paste(temp_image, (10 + trait_img_width * i, start_y), mask)
+                    elif i < 9:
+                        trait_final_image.paste(temp_image, (10 + int(trait_img_width * (i - 4.5)), start_y + int(trait_img_width * 0.8)), mask)
+                    else:
+                        trait_final_image.paste(temp_image, (10 + trait_img_width * int(i - 9), start_y + int(trait_img_width*1.6)), mask)
 
             # Fetch trait images concurrently
             await asyncio.gather(*[process_trait(trait, i) for i, trait in enumerate(sorted_traits)])
+            font = ImageFont.truetype("fonts/NotoSans-Bold.ttf", size=36)
+
+            companion_height = 150
+            companion_width = 200
+            companion_final_image = Image.new("RGBA", (companion_width,  companion_height), (0, 0, 0, 0))
+            companion_id = participant.get("companion", {}).get("content_ID")
+            companion_path = helpers.get_companion_icon(self.companion_mapping, companion_id)
+            companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
+            companion_image = await helpers.fetch_image(companion_url)
+            square = helpers.center_square_crop(companion_image)
+            circle_img = helpers.circular_crop(square)
+            circle_img.thumbnail((70,70))
+            draw = ImageDraw.Draw(companion_final_image)
+
+            def truncate_text(draw, text, font, max_width):
+                """Truncate text with ellipsis (…) if it exceeds the given pixel width."""
+                ellipsis = "…"
+                if draw.textlength(text, font=font) <= max_width:
+                    return text
+                while text and draw.textlength(text + ellipsis, font=font) > max_width:
+                    text = text[:-1]
+                return text + ellipsis
+
+            display_name = truncate_text(draw, participant.get('riotIdGameName', 'Unknown'), font, 200)
+
+            draw.text((0,80), display_name, font=font, fill="white")
+            companion_final_image.paste(circle_img, (0,20), circle_img)
+
+            try: 
+                rank_info = await helpers.get_rank_info(region, participant["puuid"], self.tft_token)
+            except Exception as err:
+                return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+        
+            tier = "UNRANKED"
+            rank = "I"
+            if rank_info:
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_TFT':
+                        tier = entry['tier']
+                        rank = entry['rank']
+
+            rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
+
+            bbox = font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
+            text_w = bbox[2] - bbox[0]
+            padding_x = 12
+            x, y = 80, 25
+            rect_coords = [
+                x, 
+                y, 
+                x + text_w + padding_x, 
+                80
+            ]
+            draw.rounded_rectangle(rect_coords, radius=8, fill=dicts.rank_to_text_fill[tier], outline=None)
+            draw.text((x + padding_x/2, y), rank_str, font=font, fill="#fdda82" if tier == "CHALLENGER" else "white")
 
             # --- Champions Processing ---
             units = participant.get('units', [])
             champ_unit_data_unsorted = []
 
             # Calculate total champion image width
-            champ_img_width = int(min(600 / len(units), 60)) if units else 60
-            rarity_width = int(champ_img_width * 1.125)
-            champ_img_height = 115
-            champ_final_image = Image.new("RGBA", (600, champ_img_height), (0, 0, 0, 0))
+            champ_img_width = int(min((1150 - trait_final_width - companion_width) / len(units), 70)) if units else 70
+            champ_img_height = 150
+            champ_final_image = Image.new("RGBA", ((1200 - trait_final_width - companion_width), champ_img_height), (0, 0, 0, 0))
 
             async def process_unit(unit):
                 champion_name = unit["character_id"]
@@ -177,15 +240,14 @@ class BotCommands(commands.Cog):
                 rarity = unit["rarity"]
                 item_names = unit["itemNames"]
 
-                print(champion_name)
                 custom_rarity = dicts.rarity_map.get(rarity, rarity)
                 champ_icon_path = helpers.get_champ_icon(self.champ_mapping, champion_name).lower()
                 rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
 
                 if champ_icon_path:
                     champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
-                    champ_task = helpers.fetch_image(champion_url, (champ_img_width, champ_img_width))
-                    rarity_task = helpers.fetch_image(rarity_url, (rarity_width, rarity_width))
+                    champ_task = helpers.fetch_image(champion_url, (64, 64))
+                    rarity_task = helpers.fetch_image(rarity_url, (72, 72))
                     
                     icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
 
@@ -203,31 +265,20 @@ class BotCommands(commands.Cog):
             champ_unit_data = sorted(champ_unit_data_unsorted, key=lambda x: x['rarity'])
 
             # --- Paste Champions & Items ---
-            async def paste_champion(unit, current_x):
-                
-                champ_final_image.paste(unit["rarity_resized"], (int(current_x), int(rarity_width/3 + 1)), unit["rarity_resized"])
-                champ_final_image.paste(unit["icon_resized"], (int(current_x + 4), int(rarity_width/3 + 5)), unit["icon_resized"])
-
-                if unit["tier"] in {2, 3}:
-                    tier_icon_path = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{unit['tier']}.png"
-                    tier_resized = await helpers.fetch_image(tier_icon_path, (rarity_width, int(rarity_width / 2)))
-                    champ_final_image.paste(tier_resized, (current_x, 0), tier_resized)
-
-                item_urls = [f"https://raw.communitydragon.org/latest/game/{helpers.get_item_icon(self.item_mapping, item).lower()}" for item in unit["item_names"]]
-
-                fetch_tasks = [helpers.fetch_image(url, (int(rarity_width/3 - 1), int(rarity_width/3 - 1))) for url in item_urls]
-                item_icons = await asyncio.gather(*fetch_tasks)
-
-                for i, item_icon in enumerate(item_icons):
-                    champ_final_image.paste(item_icon, (int(current_x + (rarity_width/3 - 1) * i), int(4 * rarity_width/3 + 1)), item_icon)
+            async def paste_champion(unit, i): 
+                champ_image = await helpers.champion_image(unit, self.item_mapping)
+                if champ_image:
+                    champ_image.thumbnail((champ_img_width, 150))
+                    champ_final_image.paste(champ_image, (((champ_img_width + 1)* i), 0), champ_image)
 
             # Process and paste champions concurrently
-            await asyncio.gather(*[paste_champion(unit, i * rarity_width) for i, unit in enumerate(champ_unit_data)])
-
+            await asyncio.gather(*[paste_champion(unit, i) for i, unit in enumerate(champ_unit_data)])
+                        
             # --- Combine Images ---
-            final_combined_image = Image.new("RGBA", (600, 185), (0, 0, 0, 0))
-            final_combined_image.paste(trait_final_image, (0, 0), trait_final_image)
-            final_combined_image.paste(champ_final_image, (0, trait_img_height), champ_final_image)
+            final_combined_image = Image.new("RGBA", (1200, 150), (0, 0, 0, 0))
+            final_combined_image.paste(trait_final_image, (companion_width, 0), trait_final_image)
+            final_combined_image.paste(champ_final_image, (companion_width + trait_final_width, 0), champ_final_image)
+            final_combined_image.paste(companion_final_image, (0,0), companion_final_image)
 
              # Get summoner's gameName and tagLine from the match_info
             gameName = participant.get('riotIdGameName', 'Unknown')
@@ -251,28 +302,13 @@ class BotCommands(commands.Cog):
             board_tasks = [generate_board(i) for i in range(start, end)]
             board_results = await asyncio.gather(*board_tasks)  # [(embed, file, image), ...]
 
-            # Modify generate_board to return final_combined_image too:
-            # return embed, file, final_combined_image
-
             embeds, files, board_images = zip(*board_results)  # unpack into three tuples
-
-            # Step 2: Create one tall image by stacking boards vertically
-            padding = 10  # height of the white bar
-            board_width = max(img.width for img in board_images)
-            total_height = sum(img.height for img in board_images) + padding * (len(board_images) - 1)
-
-            combined_image = Image.new("RGBA", (board_width, total_height), (255, 255, 255, 0))
+            combined_image = Image.new("RGBA", (1200, 600), (255, 255, 255, 0))
 
             current_y = 0
-            for i, img in enumerate(board_images):
+            for img in board_images:
                 combined_image.paste(img, (0, current_y), img)
                 current_y += img.height
-
-                if i < len(board_images) - 1:
-                    # Draw a white rectangle (bar) below this board
-                    white_bar = Image.new("RGBA", (board_width, padding), (255, 255, 255, 255))
-                    combined_image.paste(white_bar, (0, current_y))
-                    current_y += padding
 
             # Step 3: Save the final stacked image
             combined_image.save("all_boards_vertical.png")
@@ -314,16 +350,15 @@ class BotCommands(commands.Cog):
                     start = 0 if new_index == 0 else 4
                     end = start + 4
                     new_embed, new_file = await generate_multiple_boards(start, end)
+                    await ctx.send(embed= new_embed, file = new_file)
                 else:
                     new_embed, new_file, _ = await generate_board(new_index - 2)
-                
-                # Update the message with new data
-                await interaction.followup.edit_message(
-                    message_id=interaction.message.id,
-                    embed=new_embed,
-                    attachments=[new_file],
-                    view=PlayerSwitchView(new_index, self.author_id)
-                )
+                    await interaction.followup.edit_message(
+                        message_id=interaction.message.id,
+                        embed=new_embed,
+                        attachments=[new_file],
+                        view=PlayerSwitchView(new_index, self.author_id)
+                    )
 
         # --- Send Initial Message ---
         embed, file, _ = await generate_board(current_index)
@@ -400,8 +435,7 @@ class BotCommands(commands.Cog):
             damagedealt = participant["totalDamageDealtToChampions"]
             damagetaken = participant["totalDamageTaken"]
 
-            font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
-            bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
+            bold_font = ImageFont.truetype("fonts/NotoSans-Black.ttf", 18)  
 
             if participant["puuid"] == puuid:
                 strip = Image.new("RGBA", (600, 60), "#2F3136")
@@ -500,7 +534,7 @@ class BotCommands(commands.Cog):
             damage_str = f"{damagedealt/1000:.1f}k"
             participant_gold_str = f"{participant["goldEarned"]/1000:.1f}k"
 
-            damage_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 16)  
+            damage_font = ImageFont.truetype("fonts/NotoSans-Black.ttf", 16)  
             bbox = bold_font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
             text_w = bbox[2] - bbox[0]
 
@@ -512,7 +546,7 @@ class BotCommands(commands.Cog):
                 x, 
                 y, 
                 x + text_w + padding_x, 
-                28
+                30
             ]
             
             draw.rectangle([409,34,511,56], fill="black", outline=None)

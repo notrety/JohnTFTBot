@@ -330,6 +330,35 @@ def get_summs_icon(summs_json, summonerId):
     print(f"{summ} Not Found")
     return None 
 
+def center_square_crop(image: Image.Image) -> Image.Image:
+    w, h = image.size
+    min_side = min(w, h)
+    left = (w - min_side) // 2
+    top = (h - min_side) // 2
+    return image.crop((left, top, left + min_side, top + min_side))
+
+def circular_crop(image: Image.Image) -> Image.Image:
+    """
+    Returns a circularly cropped version of the given RGBA image.
+    Keeps transparency outside the circle.
+    """
+    # Ensure RGBA mode
+    image = image.convert("RGBA")
+
+    # Create same-sized mask
+    mask = Image.new("L", image.size, 0)
+    draw = ImageDraw.Draw(mask)
+
+    # Draw white filled circle in the center
+    width, height = image.size
+    draw.ellipse((0, 0, width, height), fill=255)
+
+    # Apply the mask as alpha channel
+    result = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    result.paste(image, (0, 0), mask)
+
+    return result
+
 async def fetch_image(url: str, size: tuple = None):
     print("looking for " + url) # troubleshooting line
     # Generate a unique filename from the URL
@@ -746,8 +775,8 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     tab_final.paste(gold_image, (390,75))
                     draw = ImageDraw.Draw(tab_final)
 
-                    font = ImageFont.truetype("Inter_18pt-Bold.ttf", 15)
-                    bold_font = ImageFont.truetype("Inter_18pt-ExtraBold.ttf", 18)  
+                    font = ImageFont.truetype("fonts/NotoSans-Bold.ttf", 15)
+                    bold_font = ImageFont.truetype("fonts/NotoSans-Black.ttf", 17)  
 
                     kda_str = f"{kills} / {deaths} / {assists}"
                     if deaths == 0:
@@ -950,6 +979,49 @@ async def trait_image(trait_name: str, style: int, trait_icon_mapping):
 
     except Exception as e:
         print(f"Error in trait_image for {trait_name} (style {style}): {e}")
+        return None
+
+async def champion_image(unit, item_mapping):
+
+    try:
+        tier = unit["tier"]
+        item_names = unit["item_names"]
+
+        rarity_resized = unit["rarity_resized"]
+        icon_resized = unit["icon_resized"]
+        tile_image = Image.new("RGBA", (72, 115), (0, 0, 0, 0))
+
+        tile_image.paste(rarity_resized, (0, 20), rarity_resized)
+        tile_image.paste(icon_resized, (4, 24), icon_resized)
+
+        # Add tier stars (2★ or 3★)
+        if tier in {2, 3}:
+            tier_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/tft-piece-star-{tier}.png"
+            tier_icon = await fetch_image(tier_url, (72, 36))
+            if tier_icon:
+                tile_image.paste(tier_icon, (0, 0), tier_icon)
+
+        # Add item icons if available
+        if item_names:
+            item_urls = [
+                f"https://raw.communitydragon.org/latest/game/{get_item_icon(item_mapping, item).lower()}"
+                for item in item_names
+            ]
+
+            fetch_tasks = [
+                fetch_image(url, (24,24))
+                for url in item_urls
+            ]
+            item_icons = await asyncio.gather(*fetch_tasks)
+
+            # Center the items horizontally below the portrait
+            for i, item_icon in enumerate(item_icons):
+                tile_image.paste(item_icon, (24 * i, 92), item_icon)
+
+        return tile_image
+
+    except Exception as e:
+        print(f"Error building champion image for {unit.get('champion_name', 'Unknown')}: {e}")
         return None
 
 # Calculate how long ago timestamp was to include in !r response
