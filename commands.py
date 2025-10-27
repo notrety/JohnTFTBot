@@ -108,13 +108,14 @@ class BotCommands(commands.Cog):
             if not puuid:
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
-    
-        result, match_id, avg_rank, master_plus_lp, time = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.tft_token, region, gameNum)
 
+        result, match_id, avg_rank, master_plus_lp, time, player_placement = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.tft_token, region, gameNum)
+
+        embed_colors = ['#F0B52B', '#969696', '#A45F00', '#595988', '#596263', '#596263', '#596263', '#596263']
         embed = discord.Embed(
             title=f"Recent {game_type} TFT Match Placements:",
             description=result,
-            color=discord.Color.blue()
+            color=discord.Color(int(embed_colors[player_placement - 1].strip("#"), 16))
         )
 
         embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
@@ -143,16 +144,21 @@ class BotCommands(commands.Cog):
             sorted_traits = sorted(filtered_traits, key=lambda x: dicts.style_order.get(x['style'], 5))
             num_traits = len(sorted_traits)
             if num_traits <= 5:
-                start_y = 21
+                start_y = 40
             elif num_traits <= 9:
-                start_y = 10
+                start_y = 20
             else: 
                 start_y = 0
 
             trait_img_width = 56
             trait_img_height = 150
             trait_final_width = 310
-            trait_final_image = Image.new("RGBA", (trait_final_width, trait_img_height), (0, 0, 0, 0))
+            if puuid == participant['puuid']:
+                background_color = "#2F3136"
+            else:
+                background_color = (0,0,0,0)
+
+            trait_final_image = Image.new("RGBA", (trait_final_width, trait_img_height), background_color)
 
             async def process_trait(trait, i):
                 temp_image = await helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
@@ -172,8 +178,8 @@ class BotCommands(commands.Cog):
             font = ImageFont.truetype("fonts/NotoSans-Bold.ttf", size=36)
 
             companion_height = 150
-            companion_width = 200
-            companion_final_image = Image.new("RGBA", (companion_width,  companion_height), (0, 0, 0, 0))
+            companion_width = 220
+            companion_final_image = Image.new("RGBA", (companion_width,  companion_height), background_color)
             companion_id = participant.get("companion", {}).get("content_ID")
             companion_path = helpers.get_companion_icon(self.companion_mapping, companion_id)
             companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
@@ -184,7 +190,7 @@ class BotCommands(commands.Cog):
             draw = ImageDraw.Draw(companion_final_image)
 
             def truncate_text(draw, text, font, max_width):
-                """Truncate text with ellipsis (…) if it exceeds the given pixel width."""
+                # Truncate text with ellipsis (…) if it exceeds the given pixel width.
                 ellipsis = "…"
                 if draw.textlength(text, font=font) <= max_width:
                     return text
@@ -194,8 +200,8 @@ class BotCommands(commands.Cog):
 
             display_name = truncate_text(draw, participant.get('riotIdGameName', 'Unknown'), font, 200)
 
-            draw.text((0,80), display_name, font=font, fill="white")
-            companion_final_image.paste(circle_img, (0,20), circle_img)
+            draw.text((20,90), display_name, font=font, fill="white")
+            companion_final_image.paste(circle_img, (20,20), circle_img)
 
             try: 
                 rank_info = await helpers.get_rank_info(region, participant["puuid"], self.tft_token)
@@ -215,7 +221,7 @@ class BotCommands(commands.Cog):
             bbox = font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
             text_w = bbox[2] - bbox[0]
             padding_x = 12
-            x, y = 80, 25
+            x, y = 100, 25
             rect_coords = [
                 x, 
                 y, 
@@ -230,9 +236,9 @@ class BotCommands(commands.Cog):
             champ_unit_data_unsorted = []
 
             # Calculate total champion image width
-            champ_img_width = int(min((1150 - trait_final_width - companion_width) / len(units), 70)) if units else 70
+            champ_img_width = int(min((1180 - trait_final_width - companion_width) / len(units), 70)) if units else 70
             champ_img_height = 150
-            champ_final_image = Image.new("RGBA", ((1200 - trait_final_width - companion_width), champ_img_height), (0, 0, 0, 0))
+            champ_final_image = Image.new("RGBA", ((1200 - trait_final_width - companion_width), champ_img_height), background_color)
 
             async def process_unit(unit):
                 champion_name = unit["character_id"]
@@ -269,7 +275,7 @@ class BotCommands(commands.Cog):
                 champ_image = await helpers.champion_image(unit, self.item_mapping)
                 if champ_image:
                     champ_image.thumbnail((champ_img_width, 150))
-                    champ_final_image.paste(champ_image, (((champ_img_width + 1)* i), 0), champ_image)
+                    champ_final_image.paste(champ_image, (((champ_img_width + 1)* i), 15), champ_image)
 
             # Process and paste champions concurrently
             await asyncio.gather(*[paste_champion(unit, i) for i, unit in enumerate(champ_unit_data)])
@@ -310,26 +316,11 @@ class BotCommands(commands.Cog):
                 combined_image.paste(img, (0, current_y), img)
                 current_y += img.height
 
-            # Step 3: Save the final stacked image
-            combined_image.save("all_boards_vertical.png")
-            final_file = discord.File("all_boards_vertical.png", filename="all_boards_vertical.png")
-
-            # Optional: You can still send individual embeds if you want, or just the final one
-            if start == 0:
-                embed_title = "Top 4 Boards"
-            else: 
-                embed_title = "Bot 4 Boards"
-
-            final_embed = discord.Embed(title=embed_title)
-            final_embed.set_image(url="attachment://all_boards_vertical.png")
-
-            return final_embed, final_file
-
+            return combined_image
         Select_options =[
-            discord.SelectOption(label=f"Top 4 Boards", value=0),
-            discord.SelectOption(label=f"Bot 4 Boards", value=1)
+            discord.SelectOption(label=f"All Boards", value=0),
         ] + [
-            discord.SelectOption(label=f"{index + 1} - {participant.get('riotIdGameName')}#{participant.get('riotIdTagline')}", value=index+2) for index, participant in enumerate(participants_sorted)
+            discord.SelectOption(label=f"{index + 1} - {participant.get('riotIdGameName')}#{participant.get('riotIdTagline')}", value=index+1) for index, participant in enumerate(participants_sorted)
         ] 
 
         # --- Dropdown View ---
@@ -346,13 +337,31 @@ class BotCommands(commands.Cog):
                     return
                 await interaction.response.defer()  # Avoid timeout
                 new_index = int(interaction.data['values'][0])
-                if new_index in (0, 1):
-                    start = 0 if new_index == 0 else 4
-                    end = start + 4
-                    new_embed, new_file = await generate_multiple_boards(start, end)
-                    await ctx.send(embed= new_embed, file = new_file)
+                if new_index == 0:
+                    top4_img = await generate_multiple_boards(0, 4)
+                    bot4_img = await generate_multiple_boards(4, 8)
+
+                    top4_img.save("top4.png")
+                    bot4_img.save("bot4.png")
+
+                    top4_file = discord.File("top4.png", filename="top4.png") 
+                    bot4_file = discord.File("bot4.png", filename="bot4.png")
+
+                    top4_embed = discord.Embed(
+                        title="All Boards",
+                    )
+                    top4_embed.set_image(url="attachment://top4.png")
+
+                    bot4_embed = discord.Embed(
+                        # title="All Boards",
+                    )
+                    bot4_embed.set_image(url="attachment://bot4.png")
+
+                    await ctx.send(embed= top4_embed, file = top4_file)
+                    await ctx.send(embed= bot4_embed, file = bot4_file)
+
                 else:
-                    new_embed, new_file, _ = await generate_board(new_index - 2)
+                    new_embed, new_file, _ = await generate_board(new_index - 1)
                     await interaction.followup.edit_message(
                         message_id=interaction.message.id,
                         embed=new_embed,
@@ -831,9 +840,14 @@ class BotCommands(commands.Cog):
                     result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}**\n"
                 else:
                     result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set14): {icon} {user_tier} {user_rank}\n"
+        
+        if server:
+            embed_title= "Server TFT Ranked Leaderboard"
+        else:
+            embed_title= "Overall TFT Ranked Leaderboard"
 
         lb_embed = discord.Embed(
-            title="Overall Bot Ranked Leaderboard",
+            title=embed_title,
             description=result,
             color=discord.Color.blue()
         )
@@ -860,10 +874,7 @@ class BotCommands(commands.Cog):
                 return
 
             try:
-                # Fetch puuid (still using your helper)
                 puuid = await helpers.get_puuid(user["name"], user["tag"], user["mass_region"], self.lol_token)
-
-                # Make Riot API call via Pulsefire client; rate limiting handled automatically
                 user_elo, user_tier, user_rank, user_lp = await helpers.lol_calculate_elo(
                     puuid, self.lol_token, user["region"])
 
@@ -879,10 +890,8 @@ class BotCommands(commands.Cog):
             for user in all_users:
                 await tg.create_task(process_user(user))
 
-        # Sort users by elo descending
         user_elo_and_name.sort(reverse=True, key=lambda x: x[0])
 
-        # Build leaderboard embed
         for index, (user_elo, user_tier, user_rank, user_lp, name_and_tag, region) in enumerate(user_elo_and_name):
             name, tag = name_and_tag.split("#")
             icon = dicts.tier_to_rank_icon[user_tier]
@@ -893,14 +902,18 @@ class BotCommands(commands.Cog):
             else:
                 text = f"{icon} {user_tier} {user_rank}"
 
-            # Highlight command user
             if name == gameName and tag == tagLine:
                 result += f"**{index + 1}** - **[__{name_and_tag}__]({profile_url}): {text}**\n"
             else:
                 result += f"**{index + 1}** - [{name_and_tag}]({profile_url}): {text}\n"
 
+        if server:
+            embed_title= "Server LOL Ranked Leaderboard"
+        else:
+            embed_title= "Overall LOL Ranked Leaderboard"
+
         lb_embed = discord.Embed(
-            title="Overall Bot Ranked Leaderboard",
+            title=embed_title,
             description=result,
             color=discord.Color.blue()
         )

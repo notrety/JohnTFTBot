@@ -623,16 +623,16 @@ async def find_match_ids(gameName, tagLine, mode, game, mass_region, token):
 async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, game_num):
     puuid = await get_puuid(gameName, tagLine, mass_region, tft_token)
     if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None
+        return f"Could not find PUUID for {gameName}#{tagLine}.", None, None, 0, None, None
 
     if not (1 <= game_num <= 20):
-        return f"Please enter a number between 1 and 20.", None, None, 0, None
+        return f"Please enter a number between 1 and 20.", None, None, 0, None, None
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
             match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
             if not match_list:
-                return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None
+                return f"No matches found for {gameName}#{tagLine}.", None, None, 0, None, None
 
             target_queue = dicts.game_type_to_id[mode]
             match_id = None
@@ -647,7 +647,7 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
                         break
 
             if not match_id:
-                return f"No recent {mode.lower()} matches found for {gameName}#{tagLine}.", None, None, 0, None
+                return f"No recent {mode.lower()} matches found for {gameName}#{tagLine}.", None, None, 0, None, None
 
             match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
             participants = match_info['info']['participants']
@@ -664,7 +664,6 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
 
             for i, participant in enumerate(participants):
                 placement = participant['placement']
-                player_puuid = participant['puuid']
                 riot_id = riot_ids[i]
                 rank_info = ranks[i]
 
@@ -698,17 +697,17 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
             for placement, name, icon in players_data:
                 if custom_equal(full_name, name, "_ "):
                     result += f"{icon} **{placement}** - **__{name}__**\n"
+                    player_placement = placement
                 else:
                     result += f"{icon} **{placement}** - {name}\n"
 
-            return result, match_id, avg_rank, master_lp, time_and_time_ago
+            return result, match_id, avg_rank, master_lp, time_and_time_ago, player_placement
 
     except Exception as err:
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Function to grab previous match data
 async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color, header):
-
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
 
