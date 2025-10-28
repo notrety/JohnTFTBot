@@ -94,6 +94,13 @@ class BotCommands(commands.Cog):
         else:
             game_type = "Ranked"
         
+        mappings = {
+            "item_mapping": self.item_mapping,     # item ID → icon path
+            "companion_mapping": self.companion_mapping,     # keystone ID → icon path
+            "champ_mapping": self.champ_mapping,           # rune ID → icon path
+            "trait_icon_mapping": self.trait_icon_mapping            # summoner spell ID → icon path
+        }
+
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         if not gameNum:
             gameNum = 1
@@ -111,7 +118,7 @@ class BotCommands(commands.Cog):
 
         result, match_id, avg_rank, master_plus_lp, time, player_placement = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.tft_token, region, gameNum)
 
-        embed_colors = ['#F0B52B', '#969696', '#A45F00', '#595988', '#596263', '#596263', '#596263', '#596263']
+        embed_colors = ['#F0B52B', "#B8B5B5", '#A45F00', '#595988', "#748283", '#748283', '#748283', '#748283']
         embed = discord.Embed(
             title=f"Recent {game_type} TFT Match Placements:",
             description=result,
@@ -135,7 +142,7 @@ class BotCommands(commands.Cog):
         puuid_list = [p['puuid'] for p in participants_sorted]
         current_index = puuid_list.index(puuid)
         
-        async def generate_board(index):
+        async def generate_board_strip(index):
             participant = participants_sorted[index]
 
             # --- Traits Processing ---
@@ -161,7 +168,7 @@ class BotCommands(commands.Cog):
             trait_final_image = Image.new("RGBA", (trait_final_width, trait_img_height), background_color)
 
             async def process_trait(trait, i):
-                temp_image = await helpers.trait_image(trait['name'], trait['style'], self.trait_icon_mapping)
+                temp_image = await helpers.trait_image(trait['name'], trait['style'], mappings["trait_icon_mapping"])
                 if temp_image:
                     temp_image = temp_image.convert("RGBA")
                     temp_image.thumbnail((trait_img_width, int(trait_img_width*1.16)))
@@ -181,7 +188,7 @@ class BotCommands(commands.Cog):
             companion_width = 220
             companion_final_image = Image.new("RGBA", (companion_width,  companion_height), background_color)
             companion_id = participant.get("companion", {}).get("content_ID")
-            companion_path = helpers.get_companion_icon(self.companion_mapping, companion_id)
+            companion_path = helpers.get_companion_icon(mappings["companion_mapping"], companion_id)
             companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
             companion_image = await helpers.fetch_image(companion_url)
             square = helpers.center_square_crop(companion_image)
@@ -247,7 +254,7 @@ class BotCommands(commands.Cog):
                 item_names = unit["itemNames"]
 
                 custom_rarity = dicts.rarity_map.get(rarity, rarity)
-                champ_icon_path = helpers.get_champ_icon(self.champ_mapping, champion_name).lower()
+                champ_icon_path = helpers.get_champ_icon(mappings["champ_mapping"], champion_name).lower()
                 rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
 
                 if champ_icon_path:
@@ -272,7 +279,7 @@ class BotCommands(commands.Cog):
 
             # --- Paste Champions & Items ---
             async def paste_champion(unit, i): 
-                champ_image = await helpers.champion_image(unit, self.item_mapping)
+                champ_image = await helpers.champion_image(unit, mappings["item_mapping"])
                 if champ_image:
                     champ_image.thumbnail((champ_img_width, 150))
                     champ_final_image.paste(champ_image, (((champ_img_width + 1)* i), 15), champ_image)
@@ -305,7 +312,7 @@ class BotCommands(commands.Cog):
 
         async def generate_multiple_boards(start, end):
             # Step 1: Generate boards concurrently
-            board_tasks = [generate_board(i) for i in range(start, end)]
+            board_tasks = [generate_board_strip(i) for i in range(start, end)]
             board_results = await asyncio.gather(*board_tasks)  # [(embed, file, image), ...]
 
             embeds, files, board_images = zip(*board_results)  # unpack into three tuples
@@ -323,6 +330,7 @@ class BotCommands(commands.Cog):
             discord.SelectOption(label=f"{index + 1} - {participant.get('riotIdGameName')}#{participant.get('riotIdTagline')}", value=index+1) for index, participant in enumerate(participants_sorted)
         ] 
 
+        tft_token = self.tft_token
         # --- Dropdown View ---
         class PlayerSwitchView(discord.ui.View):
             def __init__(self, index, author_id):
@@ -361,16 +369,16 @@ class BotCommands(commands.Cog):
                     await ctx.send(embed= bot4_embed, file = bot4_file)
 
                 else:
-                    new_embed, new_file, _ = await generate_board(new_index - 1)
+                    new_embed, new_file, _ = await helpers.generate_board_preview(new_index-1, puuid, region, mass_region, match_id, tft_token, mappings)
                     await interaction.followup.edit_message(
                         message_id=interaction.message.id,
                         embed=new_embed,
                         attachments=[new_file],
                         view=PlayerSwitchView(new_index, self.author_id)
                     )
-
+        # index, puuid, region, mass_region, match_id, tft_token, mappings
         # --- Send Initial Message ---
-        embed, file, _ = await generate_board(current_index)
+        embed, file, _ = await helpers.generate_board_preview(current_index, puuid, region, mass_region, match_id, tft_token, mappings)
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
         os.remove("player_board.png")
 
@@ -455,7 +463,7 @@ class BotCommands(commands.Cog):
                 kda_ratio_str = "Perfect"
             else:
                 kda_ratio = (kills + assists) / deaths
-                kda_ratio_str = f"{kda_ratio:.2f}:1  KDA"
+                kda_ratio_str = f"{kda_ratio:.2f}:1 KDA"
             cspm = cs * 60 / duration
             kda_str = f"{kills}/{deaths}/{assists}"
             cs_str = f" CS {cs} "

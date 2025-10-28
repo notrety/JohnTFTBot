@@ -363,7 +363,7 @@ async def fetch_image(url: str, size: tuple = None):
     print("looking for " + url) # troubleshooting line
     # Generate a unique filename from the URL
     url_hash = hashlib.sha256(url.encode()).hexdigest()
-    ext = os.path.splitext(url)[1].split("?")[0] or ".png"
+    ext = os.path.splitext(url)[1].split("?")[0] or ".png" or ".svg"
     cache_path = os.path.join(CACHE_DIR, f"{url_hash}{ext}")
 
     # Try loading from cache
@@ -575,7 +575,6 @@ def round_elo_to_rank(avg_elo):
     return rank, 0
 
 async def find_match_ids(gameName, tagLine, mode, game, mass_region, token):
-
     puuid = await get_puuid(gameName, tagLine, mass_region, token)
     if not puuid:
         return f"Could not find PUUID for {gameName}#{tagLine}.", None
@@ -618,7 +617,219 @@ async def find_match_ids(gameName, tagLine, mode, game, mass_region, token):
             return None, time_sorted, puuid
     except Exception as err:
             return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, puuid
+
+async def generate_board_preview(index, puuid, region, mass_region, match_id, tft_token, mappings):
+
+    async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
+        match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+
+    participants = match_info['info']['participants']
+
+    # Sort in ascending order
+    if puuid not in [p['puuid'] for p in participants]:
+        return f"Could not find participant with PUUID: {puuid}"
+
+    participants_sorted = sorted(participants, key=lambda x: x['placement'])
+    puuid_list = [p['puuid'] for p in participants_sorted]
+    current_index = puuid_list.index(puuid)
+    participant = participants_sorted[index]
+
+    # --- Traits Processing ---
+    traits = participant['traits']
+    filtered_traits = [trait for trait in traits if trait['style'] >= 1]
+    sorted_traits = sorted(filtered_traits, key=lambda x: dicts.style_order.get(x['style'], 5))
+    num_traits = len(sorted_traits)
+    start_y = 15
+
+    if num_traits == 0:
+        trait_img_width = 0
+    else:
+        trait_img_width = int(min((675 / num_traits), 71))
+
+    trait_img_height = 110
+    trait_final_width = 675
+    if puuid == participant['puuid']:
+        background_color = "#2F3136"
+    else:
+        background_color = (0,0,0,0)
+
+    trait_final_image = Image.new("RGBA", (trait_final_width, trait_img_height), background_color)
+
+    async def process_trait(trait, i):
+        temp_image = await trait_image(trait['name'], trait['style'], mappings["trait_icon_mapping"])
+        if temp_image:
+            temp_image = temp_image.convert("RGBA")
+            temp_image.thumbnail((trait_img_width, int(trait_img_width*1.16)))
+            mask = temp_image.split()[3]
+            trait_final_image.paste(temp_image, (trait_img_width * i, start_y), mask)
+
+    # Fetch trait images concurrently
+    await asyncio.gather(*[process_trait(trait, i) for i, trait in enumerate(sorted_traits)])
+    font = ImageFont.truetype("fonts/NotoSans-Bold.ttf", size=28)
+    bold_font = ImageFont.truetype("fonts/NotoSans-Black.ttf", size=60)  
+
+    companion_height = 235
+    companion_width = 225
+    companion_size = 100
+    companion_final_image = Image.new("RGBA", (companion_width,  companion_height), background_color)
+    companion_id = participant.get("companion", {}).get("content_ID")
+    companion_path = get_companion_icon(mappings["companion_mapping"], companion_id)
+    companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
+    companion_image = await fetch_image(companion_url)
+    square = center_square_crop(companion_image)
+    circle_img = circular_crop(square)
+    circle_img.thumbnail((companion_size,companion_size))
+    draw = ImageDraw.Draw(companion_final_image)
+
+    def truncate_text(draw, text, font, max_width):
+        # Truncate text with ellipsis (…) if it exceeds the given pixel width.
+        ellipsis = "…"
+        if draw.textlength(text, font=font) <= max_width:
+            return text
+        while text and draw.textlength(text + ellipsis, font=font) > max_width:
+            text = text[:-1]
+        return text + ellipsis
+        
+    display_name = truncate_text(draw, participant.get('riotIdGameName', 'Unknown'), font, 210)
+    bbox = font.getbbox(display_name)  # (x_min, y_min, x_max, y_max)
+    name_w = bbox[2] - bbox[0]
+
+    placements = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"]
+    font_color = ['#F0B52B', "#B8B5B5", '#A45F00', '#595988', "#748283", '#748283', '#748283', '#748283']
+    player_placement = participant.get("placement")
     
+    draw.text((15, 5), placements[player_placement - 1], font=bold_font, fill=font_color[player_placement - 1])
+    if name_w <= companion_size:
+        draw_centered(draw, display_name, font, 65, y=190, fill="white")
+    else:
+        draw.text((15,190), display_name, font=font, fill="white")
+    companion_final_image.paste(circle_img, (15,90), circle_img)
+
+    try: 
+        rank_info = await get_rank_info(region, participant["puuid"], tft_token)
+    except Exception as err:
+        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
+
+    tier = "UNRANKED"
+    rank = "I"
+    if rank_info:
+        for entry in rank_info:
+            if entry['queueType'] == 'RANKED_TFT':
+                tier = entry['tier']
+                rank = entry['rank']
+
+    rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
+
+    bbox = font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
+    text_w = bbox[2] - bbox[0]
+    padding_x = 12
+    x, y = 130, 140
+    rect_coords = [
+        x, 
+        y, 
+        x + text_w + padding_x, 
+        180
+    ]
+    draw.rounded_rectangle(rect_coords, radius=8, fill=dicts.rank_to_text_fill[tier], outline=None)
+    draw.circle((100,175),15, fill="Black", outline="White")
+    draw_centered(draw, str(participant.get("level","?")), font, 100, y=155, fill="White")
+    draw.text((x + padding_x/2, y), rank_str, font=font, fill="#fdda82" if tier == "CHALLENGER" else "white")
+
+    # --- Champions Processing ---
+    units = participant.get('units', [])
+    champ_unit_data_unsorted = []
+
+    # Calculate total champion image width
+    champ_img_width = int(min((655) / len(units), 70)) if units else 70
+    champ_img_height = 125
+    champ_final_image = Image.new("RGBA", (675, champ_img_height), background_color)
+
+    async def process_unit(unit):
+        champion_name = unit["character_id"]
+        tier = unit["tier"]
+        rarity = unit["rarity"]
+        item_names = unit["itemNames"]
+
+        custom_rarity = dicts.rarity_map.get(rarity, rarity)
+        champ_icon_path = get_champ_icon(mappings["champ_mapping"], champion_name).lower()
+        rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
+
+        if champ_icon_path:
+            champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
+            champ_task = fetch_image(champion_url, (64, 64))
+            rarity_task = fetch_image(rarity_url, (72, 72))
+            
+            icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
+
+            champ_unit_data_unsorted.append({
+                "champion_name": champion_name,
+                "icon_resized": icon_resized,
+                "rarity_resized": rarity_resized,
+                "rarity": rarity,
+                "tier": tier,
+                "item_names": item_names
+            })
+
+    # Fetch all champion icons & rarity images concurrently
+    await asyncio.gather(*[process_unit(unit) for unit in units])
+    champ_unit_data = sorted(champ_unit_data_unsorted, key=lambda x: x['rarity'])
+
+    # --- Paste Champions & Items ---
+    async def paste_champion(unit, i): 
+        champ_image = await champion_image(unit, mappings["item_mapping"])
+        if champ_image:
+            champ_image.thumbnail((champ_img_width, champ_img_height))
+            champ_final_image.paste(champ_image, (((champ_img_width + 1)* i), 0), champ_image)
+
+    # Process and paste champions concurrently
+    await asyncio.gather(*[paste_champion(unit, i) for i, unit in enumerate(champ_unit_data)])
+
+    stats_height = 50
+    stats_image = Image.new("RGBA", (900, stats_height), background_color)
+    gold_image = await fetch_image("https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft/global/default/images/home/tft_icon_coins.png", (40,40))
+    damage_image = await fetch_image("https://cdn.tft.tools/general/announce_icon_combat.png", (40,40))
+
+    gold_left = str(participant.get('gold_left','Unknown')) + " |"
+    stage, round_num  = divmod(participant.get('last_round','Unknown') - 4 , 7)
+    total_damage_to_players = str(participant.get('total_damage_to_players','Unknown'))
+    round_str = f"| {stage+2} - {round_num}"
+
+    draw = ImageDraw.Draw(stats_image)
+    bbox = font.getbbox(gold_left)  # (x_min, y_min, x_max, y_max)
+    gold_w = bbox[2] - bbox[0]
+    bbox = font.getbbox(total_damage_to_players) # (x_min, y_min, x_max, y_max)
+    damage_w = bbox[2] - bbox[0]
+    
+    stats_image.paste(gold_image, (5,5), gold_image)
+    draw.text((55,5), gold_left, font=font, fill="White")
+    stats_image.paste(damage_image, (65 + gold_w, 5), damage_image)
+    draw.text((105 + gold_w, 5), total_damage_to_players, font=font, fill="White")
+    draw.text((115 + gold_w + damage_w, 5), round_str, font=font, fill="White")
+
+    # --- Combine Images ---
+    final_combined_image = Image.new("RGBA", (900, companion_height + stats_height), (0, 0, 0, 0))
+    final_combined_image.paste(trait_final_image, (companion_width, 0), trait_final_image)
+    final_combined_image.paste(champ_final_image, (companion_width, trait_img_height), champ_final_image)
+    final_combined_image.paste(companion_final_image, (0,0), companion_final_image)
+    final_combined_image.paste(stats_image, (0,companion_height), stats_image)
+
+    # Get summoner's gameName and tagLine from the match_info
+    gameName = participant.get('riotIdGameName', 'Unknown')
+    tagLine = participant.get('riotIdTagline', 'Unknown')
+
+    # Save & Return Image & Embed
+    final_combined_image.save("player_board.png")
+    embed_colors = ['#F0B52B', "#B8B5B5", '#A45F00', '#595988', "#748283", '#748283', '#748283', '#748283']
+    embed = discord.Embed(
+        color=discord.Color(int(embed_colors[player_placement - 1].strip("#"), 16))
+    )
+
+    file = discord.File("player_board.png", filename="player_board.png")
+    embed.set_image(url="attachment://player_board.png")
+
+    return embed, file, final_combined_image
+
+
 # Function to grab previous match data
 async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, game_num):
     puuid = await get_puuid(gameName, tagLine, mass_region, tft_token)
