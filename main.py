@@ -9,30 +9,15 @@ import helpers
 import asyncpg
 from discord.ext import commands
 from dotenv import load_dotenv
-from pymongo.mongo_client import MongoClient
 from config import config
 
 load_dotenv()
-
-uri = os.getenv("MONGO_URI")
-
-# Create a new client and connect to the server
-client = MongoClient(uri)
-db = client["Users"]
-collection = db["users"]
 
 async def create_pool():
     params = config()
     pool = await asyncpg.create_pool(**params, min_size=2, max_size=10)
     print("Connection pool created.")
     return pool
-
-# Send a ping to confirm a successful connection
-try:
-    client.admin.command('ping')
-    print("Pinged your deployment. You successfully connected to MongoDB!")
-except Exception as e:
-    print(e)
 
 # Get the token
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
@@ -128,20 +113,6 @@ bot = commands.Bot(command_prefix=bot_prefix, intents=intents, case_insensitive=
 mass_region = "americas"
 region = "na1"        
 
-bot.collection = collection
-bot.tft_token = tft_token
-bot.lol_token = lol_token
-bot.region = region
-bot.mass_region = mass_region
-bot.champ_mapping = champ_mapping
-bot.item_mapping = item_mapping
-bot.trait_icon_mapping = trait_icon_mapping
-bot.companion_mapping = companion_mapping
-bot.lol_item_mapping = lol_item_mapping
-bot.keystone_mapping = keystone_mapping
-bot.runes_mapping = runes_mapping
-bot.summs_mapping = summs_mapping
-
 # Take a snapshot of games and LP for !today command
 async def scheduler(pool, interval_minutes=5):
     """Runs the scheduled task every N minutes in the background."""
@@ -151,10 +122,10 @@ async def scheduler(pool, interval_minutes=5):
     print(f"Background scheduler started. Updating every {interval_minutes} minutes.")
     
     while not bot.is_closed():
+
         start_time = datetime.datetime.now(eastern).strftime("%Y-%m-%d %H:%M:%S %Z")
         try:
-            async with pool.acquire() as conn:
-                await helpers.update_db_games(conn, tft_token, lol_token)
+            await helpers.update_db_games(pool, tft_token, lol_token)
             print(f"Updated games at {start_time}")
         except Exception as e:
             print(f"Scheduler failed at {start_time}: {e}")
@@ -165,15 +136,31 @@ async def scheduler(pool, interval_minutes=5):
 @bot.event
 async def on_ready():
     pool = await create_pool()
+
+    bot.tft_token = tft_token
+    bot.lol_token = lol_token
+    bot.region = region
+    bot.mass_region = mass_region
+    bot.champ_mapping = champ_mapping
+    bot.item_mapping = item_mapping
+    bot.trait_icon_mapping = trait_icon_mapping
+    bot.companion_mapping = companion_mapping
+    bot.lol_item_mapping = lol_item_mapping
+    bot.keystone_mapping = keystone_mapping
+    bot.runes_mapping = runes_mapping
+    bot.summs_mapping = summs_mapping
+    bot.pool = pool
+
     bot.loop.create_task(scheduler(pool, interval_minutes=5))
     try:
         await bot.load_extension('commands')
         await bot.tree.sync()
         print(f"Synced slash commands for {bot.user}")
+        await helpers.find_missing_games(pool, tft_token, lol_token)
     except Exception as e:
         print(f"Failed to load extension: {e}")
 
-    print(f'🤖 Bot is online as {bot.user}')
+    print(f'Bot is online as {bot.user}')
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -184,5 +171,9 @@ async def on_command_error(ctx, error):
 async def on_command(ctx):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Command used: {ctx.command} at {timestamp}")
+
+@bot.event
+async def on_close():
+    await bot.pool.close()
 
 bot.run(bot_token)

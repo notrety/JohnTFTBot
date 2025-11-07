@@ -15,11 +15,10 @@ from datetime import datetime, timedelta, timezone
 
 # Classify file commands as a cog that can be loaded in main
 class BotCommands(commands.Cog):
-    def __init__(self, bot, tft_token, lol_token, collection, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping, lol_item_mapping, keystone_mapping, runes_mapping, summs_mapping):
+    def __init__(self, bot, tft_token, lol_token, region, mass_region, champ_mapping, item_mapping, trait_icon_mapping, companion_mapping, lol_item_mapping, keystone_mapping, runes_mapping, summs_mapping, pool):
         self.bot = bot
         self.tft_token = tft_token
         self.lol_token = lol_token
-        self.collection = collection
         self.region = region
         self.mass_region = mass_region
         self.champ_mapping = champ_mapping
@@ -30,6 +29,7 @@ class BotCommands(commands.Cog):
         self.keystone_mapping = keystone_mapping
         self.runes_mapping = runes_mapping
         self.summs_mapping = summs_mapping
+        self.pool = pool
 
     # Basic test command
     @commands.command()
@@ -42,7 +42,7 @@ class BotCommands(commands.Cog):
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         
         if user_id:
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
             region = self.region
             mass_region = self.mass_region
@@ -63,15 +63,14 @@ class BotCommands(commands.Cog):
     async def leagueStats(self, ctx, *args):
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         if user_id:
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "League")
         else: 
             region = self.region
             mass_region = self.mass_region
-            
-        puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
-        if not puuid:
-            print(f"Could not find PUUID for {gameName}#{tagLine}.")
-            return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
+            if not puuid:
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
             
         rank_embed, error_message = await helpers.get_lol_rank_embed(gameName, tagLine, region, self.lol_token, puuid)
 
@@ -107,7 +106,7 @@ class BotCommands(commands.Cog):
 
         # pull user data if registered
         if user_id:
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
             region = self.region
             mass_region = self.mass_region
@@ -412,15 +411,15 @@ class BotCommands(commands.Cog):
             game_num = 0
 
         if user_id:
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "League")
         else:
             region = self.region
             mass_region = self.mass_region
-
-        puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
-        if not puuid:
-            print(f"Could not find PUUID for {gameName}#{tagLine}.")
-            return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
+            if not puuid:
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            
         background_color = (0,0,0,0)
 
         error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
@@ -667,15 +666,15 @@ class BotCommands(commands.Cog):
             game_num = 0
 
         if user_id:
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "League")
         else:
             region = self.region
             mass_region = self.mass_region
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
+            if not puuid:
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
-        puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
-        if not puuid:
-            print(f"Could not find PUUID for {gameName}#{tagLine}.")
-            return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
         background_color = (0,0,0,0)
 
         error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
@@ -795,7 +794,7 @@ class BotCommands(commands.Cog):
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command(name="lb", aliases=["leaderboard", "server", "serverlb"])
     async def lb(self, ctx):
-        _, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
+        data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(ctx.author.id, self.pool, "TFT")
         result = ""
         server = False
         if ctx.guild and ctx.invoked_with in {"server", "serverlb"}:
@@ -864,7 +863,7 @@ class BotCommands(commands.Cog):
 
     @commands.command(name="leaguelb", aliases=["leagueleaderboard", "lserver", "lserverlb", "llb"])
     async def leaguelb(self, ctx):
-        _, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
+        data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(ctx.author.id, self.pool, "TFT")
         result = ""
         server = False
         if ctx.guild and ctx.invoked_with in {"lserver", "lserverlb"}:
@@ -976,7 +975,7 @@ class BotCommands(commands.Cog):
 
         # pull user data if registered
         if user_id:
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
             mass_region = self.mass_region
             puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
@@ -1054,135 +1053,114 @@ class BotCommands(commands.Cog):
     @commands.command(name="today", aliases=["t"])
     async def today(self, ctx, *args): 
         # Account must be linked for this command
-        data = False
-        if len(args) == 2:  # Expecting name and tagline
-            gameName = args[0].replace("_", " ")
-            tagLine = args[1]
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data_name_tag(gameName, tagLine, self.collection) # Check if name and tag are in database
-            if not data:
-                await ctx.send(f"{gameName}#{tagLine} has not linked their name and tagline.")
-        elif len(args) == 1 and args[0].startswith("<@"):  # Check if it's a mention
-            mentioned_user = args[0]
-            user_id = mentioned_user.strip("<@!>")  # Remove the ping format to get the user ID
-            # Check if user is linked
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(user_id, self.collection)
-            if not data:
-                await ctx.send(f"{mentioned_user} has not linked their name and tagline.")
-        elif len(args) == 0: # Check for linked account by sender
-            data, gameName, tagLine, region, mass_region, puuid, discord_id = helpers.check_data(ctx.author.id, self.collection)
-            if not data:
-                await ctx.send("You have not linked any data or provided a player. Use `/link <name> <tag>` to link your account.")
-        else: 
-            # User formatted command incorrectly, let them know
-            await ctx.send("Please use this command by typing in a name and tagline, by pinging someone, or with no extra text if your account is linked.")
+        gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
 
-        if data:
-            text = ""
-            if not mass_region:
-                mass_region = self.mass_region
-            if not region:
-                region = self.region
+        if user_id:
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
+        else:
+            region = self.region
+            mass_region = self.mass_region
+            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
             if not puuid:
-                puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
-
-            if not puuid:
-                text = f"ERROR: Could not find PUUID for {gameName}#{tagLine}."
-            rank_info = await helpers.get_rank_info(region, puuid, self.tft_token)
-            db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
-            if not db_user_data:
-                text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
-            if "games" not in db_user_data:
-                text = f"ERROR: If you linked your account in the past day, this command will not work as we need to store the data from the previous day."
-            if text == "":
-                db_games = db_user_data['games']
-                db_elo = db_user_data['elo']
-                for entry in rank_info:
-                    if entry['queueType'] == 'RANKED_TFT':
-                        tier = entry['tier']
-                        rank = entry['rank']
-                        lp = entry['leaguePoints']
-                        elo = dicts.rank_to_elo[tier + " " + rank] + int(lp)
-                        total_games = entry['wins'] + entry['losses']
-                if total_games == db_games:
-                    text = f"No games played today by {gameName}#{tagLine}."
-                    embed = discord.Embed(
-                        description=text,
-                        color=discord.Color.blue()
-                    )
-                    embed.set_author(
-                        name=f"Today: {gameName}#{tagLine}",
-                        url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
-                        icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
-                    )
-
-                    await ctx.send(embed=embed)
-                    return
-                if db_elo == None:
-                    db_elo = 0
-                elo_diff = elo - db_elo
-                lp_diff = ""
-                lp_diff_emoji = ""
-                if elo_diff >= 0:
-                    lp_diff = "+" + str(elo_diff)
-                    lp_diff_emoji = "📈"
-                else:
-                    lp_diff = str(elo_diff)
-                    lp_diff_emoji = "📉"
-                today_games = total_games - db_games
-                async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
-                    match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
-                    
-                    if not match_list:
-                        return f"No matches found for {gameName}#{tagLine}."
-                    
-                    placements = []
-                    num_matches = today_games
-
-                    for match in match_list:
-                        if num_matches <= 0:
-                            break
-                        try:
-                            match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
-                        except Exception as e:
-                            print(f"Error fetching match {match}: {e}")
-                            continue
-                        
-                        if match_info['info']['queue_id'] == dicts.game_type_to_id["Ranked"]:
-                            num_matches -= 1
-                            for participant in match_info['info']['participants']:
-                                if participant['puuid'] == puuid:
-                                    placements.append(participant['placement'])
-                                    break
-                if not placements:
-                    return f"No ranked placements found for {gameName}#{tagLine}."
-
-                total_placement = sum(placements)
-                scores = " ".join(dicts.number_to_num_icon[placement] for placement in placements)
-                avg_placement = round(total_placement / len(placements), 1)
-                rank_icon = dicts.tier_to_rank_icon[tier]
-                text = (
-                    f"{rank_icon} **Rank: **{tier} {rank} ({lp} LP)\n"
-                    f"📊 **Games Played:** {today_games}\n"
-                    f"⭐ **AVP:** {avg_placement}\n"
-                    f"{lp_diff_emoji} **LP Difference:** {lp_diff}\n"
-                    f"🏅 **Scores: **{scores}"
+                print(f"Could not find PUUID for {gameName}#{tagLine}.")
+                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            
+        rank_info = await helpers.get_rank_info(region, puuid, self.tft_token)
+        db_user_data = self.collection.find_one({"name": gameName, "tag": tagLine})
+        if not db_user_data:
+            text = f"ERROR: Could not find user with name {gameName}#{tagLine}"
+        if "games" not in db_user_data:
+            text = f"ERROR: If you linked your account in the past day, this command will not work as we need to store the data from the previous day."
+        if text == "":
+            db_games = db_user_data['games']
+            db_elo = db_user_data['elo']
+            for entry in rank_info:
+                if entry['queueType'] == 'RANKED_TFT':
+                    tier = entry['tier']
+                    rank = entry['rank']
+                    lp = entry['leaguePoints']
+                    elo = dicts.rank_to_elo[tier + " " + rank] + int(lp)
+                    total_games = entry['wins'] + entry['losses']
+            if total_games == db_games:
+                text = f"No games played today by {gameName}#{tagLine}."
+                embed = discord.Embed(
+                    description=text,
+                    color=discord.Color.blue()
+                )
+                embed.set_author(
+                    name=f"Today: {gameName}#{tagLine}",
+                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
+                    icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
                 )
 
-            embed = discord.Embed(
-                description=text,
-                color=discord.Color.blue()
+                await ctx.send(embed=embed)
+                return
+            if db_elo == None:
+                db_elo = 0
+            elo_diff = elo - db_elo
+            lp_diff = ""
+            lp_diff_emoji = ""
+            if elo_diff >= 0:
+                lp_diff = "+" + str(elo_diff)
+                lp_diff_emoji = "📈"
+            else:
+                lp_diff = str(elo_diff)
+                lp_diff_emoji = "📉"
+            today_games = total_games - db_games
+            async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
+                match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
+                
+                if not match_list:
+                    return f"No matches found for {gameName}#{tagLine}."
+                
+                placements = []
+                num_matches = today_games
+
+                for match in match_list:
+                    if num_matches <= 0:
+                        break
+                    try:
+                        match_info = await client.get_tft_match_v1_match(region=mass_region, id=match)
+                    except Exception as e:
+                        print(f"Error fetching match {match}: {e}")
+                        continue
+                    
+                    if match_info['info']['queue_id'] == dicts.game_type_to_id["Ranked"]:
+                        num_matches -= 1
+                        for participant in match_info['info']['participants']:
+                            if participant['puuid'] == puuid:
+                                placements.append(participant['placement'])
+                                break
+            if not placements:
+                return f"No ranked placements found for {gameName}#{tagLine}."
+
+            total_placement = sum(placements)
+            scores = " ".join(dicts.number_to_num_icon[placement] for placement in placements)
+            avg_placement = round(total_placement / len(placements), 1)
+            rank_icon = dicts.tier_to_rank_icon[tier]
+            text = (
+                f"{rank_icon} **Rank: **{tier} {rank} ({lp} LP)\n"
+                f"📊 **Games Played:** {today_games}\n"
+                f"⭐ **AVP:** {avg_placement}\n"
+                f"{lp_diff_emoji} **LP Difference:** {lp_diff}\n"
+                f"🏅 **Scores: **{scores}"
             )
-            embed.set_author(
-                name=f"Today: {gameName}#{tagLine}",
-                url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
-                icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
-            )
-            companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.tft_token)
-            companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
-            companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
-            embed.set_thumbnail(url=companion_url)
-            embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
-            await ctx.send(embed=embed)
+
+        embed = discord.Embed(
+            description=text,
+            color=discord.Color.blue()
+        )
+        embed.set_author(
+            name=f"Today: {gameName}#{tagLine}",
+            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set14",
+            icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
+        )
+        companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.tft_token)
+        companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
+        companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
+        embed.set_thumbnail(url=companion_url)
+        embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
+        await ctx.send(embed=embed)
 
     # Command to compare the profiles of two players
     @commands.command(name="compare", aliases=["c"])
@@ -1287,5 +1265,5 @@ class BotCommands(commands.Cog):
 
 # Add this class as a cog to main
 async def setup(bot):
-    await bot.add_cog(BotCommands(bot, bot.tft_token, bot.lol_token, bot.collection, bot.region, 
-                                  bot.mass_region, bot.champ_mapping, bot.item_mapping,  bot.trait_icon_mapping, bot.companion_mapping, bot.lol_item_mapping, bot.keystone_mapping, bot.runes_mapping, bot.summs_mapping))
+    await bot.add_cog(BotCommands(bot, bot.tft_token, bot.lol_token, bot.region, 
+                                  bot.mass_region, bot.champ_mapping, bot.item_mapping,  bot.trait_icon_mapping, bot.companion_mapping, bot.lol_item_mapping, bot.keystone_mapping, bot.runes_mapping, bot.summs_mapping, bot.pool))
