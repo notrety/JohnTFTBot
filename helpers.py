@@ -26,8 +26,8 @@ async def update_db_games(pool, tft_token, lol_token):
             mass_region = user['mass_region']
 
             # Fetch current LPs
-            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], tft_token, user['region'])
-            current_lol_lp, _, _, _ = await lol_calculate_elo(user['league_puuid'], lol_token, user['region'])
+            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, user['region'])
+            current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, user['region'])
 
             # Get the most recent snapshot (if any)
             last_snapshot = await conn.fetchrow('''
@@ -72,7 +72,7 @@ async def update_db_games(pool, tft_token, lol_token):
                     VALUES ($1, $2, $3, $4);
                 ''', discord_id, timestamp, current_lol_lp, current_tft_lp)
 
-    print("✅ Game updates and LP snapshots completed.")
+    print("Game updates and LP snapshots completed.")
 
 async def update_ranks(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
@@ -82,8 +82,8 @@ async def update_ranks(pool, tft_token, lol_token):
         for user in users:
             discord_id = user['discord_id']
 
-            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], tft_token, user['region'])
-            current_lol_lp, _, _, _ = await lol_calculate_elo(user['league_puuid'], lol_token, user['region'])
+            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, user['region'])
+            current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, user['region'])
 
             last_snapshot = await conn.fetchrow('''
                 SELECT league_lp, tft_lp
@@ -111,6 +111,75 @@ async def update_ranks(pool, tft_token, lol_token):
                 print(f"No LP change for {discord_id}")
 
     print("Ranks updated")
+
+async def update_user_games(pool, user_id, tft_token, lol_token):
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow('''
+            SELECT discord_id, game_name, tft_puuid, league_puuid, region, mass_region
+            FROM users
+            WHERE discord_id = $1
+        ''', user_id)
+
+        if not user:
+            print(f"No user found with discord_id={user_id}")
+            return
+
+        mass_region = user['mass_region']
+
+        current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, user['region'])
+        current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, user['region'])
+
+        last_snapshot = await conn.fetchrow('''
+            SELECT update_time, league_lp, tft_lp
+            FROM lp
+            WHERE discord_id = $1
+            ORDER BY update_time DESC
+            LIMIT 1;
+        ''', user_id)
+
+        lp_changed = (
+            last_snapshot is None or
+            last_snapshot['tft_lp'] != current_tft_lp or
+            last_snapshot['league_lp'] != current_lol_lp
+        )
+
+        if lp_changed:
+            print(f"Rank change detected for {user['game_name']}")
+
+            timestamp = int(time.time())
+
+            if last_snapshot and last_snapshot['tft_lp'] != current_tft_lp:
+                err, tft_match_list = await find_all_match_ids(
+                    user['tft_puuid'], "TFT", mass_region, tft_token, last_snapshot['update_time']
+                )
+                if tft_match_list:
+                    await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list)
+
+            if last_snapshot and last_snapshot['league_lp'] != current_lol_lp:
+                err, lol_match_list = await find_all_match_ids(
+                    user['league_puuid'], "League", mass_region, lol_token, last_snapshot['update_time']
+                )
+                if lol_match_list:
+                    await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
+
+            await conn.execute('''
+                INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
+                VALUES ($1, $2, $3, $4);
+            ''', user_id, timestamp, current_lol_lp, current_tft_lp)
+
+        else:
+            # No LP change — update timestamp of most recent snapshot
+            if last_snapshot:
+                new_timestamp = int(time.time())
+                await conn.execute('''
+                    UPDATE lp
+                    SET update_time = $1
+                    WHERE discord_id = $2
+                    AND update_time = $3;
+                ''', new_timestamp, user_id, last_snapshot['update_time'])
+
+    print("User game updates and LP snapshot completed.")
+
 
 async def add_new_match(conn, puuid, game, mass_region, token, match_list):
     if not match_list:
@@ -160,7 +229,7 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
                             ON CONFLICT (match_id, league_puuid) DO NOTHING;
                         ''', match_id, puuid, game_datetime, p['win'], p['championName'], p['kills'], p['deaths'], p['assists'], cs, match_info['info']['gameDuration'])
             print(f"Added {match_id} for {puuid}")
-            
+
 async def find_missing_games(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
 
@@ -209,7 +278,6 @@ async def find_missing_games(pool, tft_token, lol_token):
 
             if lol_match_list:
                 await add_new_match(conn, row['league_puuid'], "League", row["mass_region"], lol_token, lol_match_list)
-    print("All missing matches found!")
 
 async def get_rank_info(region, puuid, tft_token):
     async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
@@ -415,53 +483,26 @@ async def get_last_game_companion(name, tagLine, mass_region, tft_token):
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
 # Function to calculate ranked elo based on given PUUID
-async def calculate_elo(puuid, tft_token, region):
+async def calculate_elo(puuid, game, token, region):
     attempts = 0
-
     while True:
         try:
             # Fetch summoner data
-            rank_info = await get_rank_info(region, puuid, tft_token)
-
-            # Find Ranked TFT entry
-            for entry in rank_info:
-                if entry['queueType'] == 'RANKED_TFT':
-                    return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
-            return 0, "UNRANKED", "", 0  # If no ranked TFT entry is found
+            if game == "TFT":
+                rank_info = await get_rank_info(region, puuid, token)
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_TFT':
+                        return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
+                return 0, "UNRANKED", "", 0  # If no ranked TFT entry is found
+            else:
+                rank_info = await get_lol_rank_info(region, puuid, token)
+                for entry in rank_info:
+                    if entry['queueType'] == 'RANKED_SOLO_5x5':
+                        return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
+                return 0, "UNRANKED", "", 0  # If no ranked League entry is found
 
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429:
-                retry_after = int(e.response.headers.get("Retry-After", 5))  # Get wait time
-                wait_time = min(5 * (2 ** attempts), 60)  # Exponential backoff (max 60s)
-                print(f"Rate limited! Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
-                attempts += 1
-            else:
-                raise e  # Re-raise other errors
-
-async def lol_calculate_elo(puuid, lol_token, region):
-    attempts = 0
-
-    while True:
-        try:
-            # Fetch summoner data
-            rank_info = await get_lol_rank_info(region, puuid, lol_token)
-
-            # Find Ranked League entry
-            for entry in rank_info:
-                if entry['queueType'] == 'RANKED_SOLO_5x5':
-                    return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
-            return 0, "UNRANKED", "", 0  # If no ranked League entry is found
-
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429:
-                retry_after = int(e.response.headers.get("Retry-After", 5))  # Get wait time
-                wait_time = min(5 * (2 ** attempts), 60)  # Exponential backoff (max 60s)
-                print(f"Rate limited! Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
-                attempts += 1
-            else:
-                raise e  # Re-raise other errors
+            raise e  # Re-raise other errors
 
 def time_ago(game_end_ts):
     # Convert from ms → seconds
@@ -1167,8 +1208,7 @@ def custom_equal(str1, str2, chars_to_ignore):
 # Function to check if user is linked based on discord id
 async def check_data(id, pool, game):
 
-    user_id = str(id)
-    print(f"Checking data for {user_id}")
+    user_id = int(id)
     async with pool.acquire() as conn:
         row = await conn.fetchrow('''
             SELECT league_puuid, tft_puuid, game_name, tag_line, region, mass_region
@@ -1326,6 +1366,30 @@ def time_ago(timestamp):
     else:
         years = time_difference // seconds_in_year
         return f"{int(years)} years ago"
+
+def lp_to_div(elo_value):
+    # Reverse mapping: Elo -> rank string
+    elo_to_rank = {v: k for k, v in dicts.rank_to_elo.items()}
+    sorted_ranks = sorted(elo_to_rank.items(), key=lambda x: x[0])
+
+    rank_name = "UNRANKED"
+    threshold = 0
+
+    for value, name in sorted_ranks:
+        if elo_value >= value:
+            rank_name = name
+            threshold = value
+        else:
+            break
+
+    excess = elo_value - threshold
+
+    if rank_name != "UNRANKED":
+        tier, division = rank_name.split(" ")
+    else:
+        tier, division = rank_name, None
+
+    return tier, division, excess
 
 # Helper function to take in arguments for compare command
 async def take_in_compare_args(args, collection, author_id, tft_token):

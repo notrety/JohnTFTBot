@@ -122,6 +122,7 @@ async def scheduler(pool, interval_minutes=5):
     print(f"Background scheduler started. Updating every {interval_minutes} minutes.")
     
     while not bot.is_closed():
+        await asyncio.sleep(interval_minutes * 60)
 
         start_time = datetime.datetime.now(eastern).strftime("%Y-%m-%d %H:%M:%S %Z")
         try:
@@ -130,7 +131,6 @@ async def scheduler(pool, interval_minutes=5):
         except Exception as e:
             print(f"Scheduler failed at {start_time}: {e}")
 
-        await asyncio.sleep(interval_minutes * 60)
 
 # Show bot is online and invoke scheduled snapshot functionality
 @bot.event
@@ -156,7 +156,9 @@ async def on_ready():
         await bot.load_extension('commands')
         await bot.tree.sync()
         print(f"Synced slash commands for {bot.user}")
-        await helpers.find_missing_games(pool, tft_token, lol_token)
+        # await helpers.find_missing_games(pool, tft_token, lol_token)
+        print("All missing matches found!")
+
     except Exception as e:
         print(f"Failed to load extension: {e}")
 
