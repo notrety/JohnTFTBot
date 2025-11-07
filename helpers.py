@@ -9,7 +9,6 @@ from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 import os
 import hashlib
-import asyncpg
 
 CACHE_DIR = "image_cache"
 set_15_unix = 1753833600
