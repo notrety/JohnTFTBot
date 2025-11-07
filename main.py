@@ -156,7 +156,7 @@ async def on_ready():
         await bot.load_extension('commands')
         await bot.tree.sync()
         print(f"Synced slash commands for {bot.user}")
-        # await helpers.find_missing_games(pool, tft_token, lol_token)
+        await helpers.find_missing_games(pool, tft_token, lol_token)
         print("All missing matches found!")
 
     except Exception as e:
