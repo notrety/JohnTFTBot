@@ -12,6 +12,8 @@ env/
 
 # Ignore environment variables
 .env
+config.py
+database.ini
 
 # Ignore log files
 *.log

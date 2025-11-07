@@ -6,9 +6,11 @@ import pytz
 import datetime
 import asyncio
 import helpers
+import asyncpg
 from discord.ext import commands
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
+from config import config
 
 load_dotenv()
 
@@ -18,6 +20,12 @@ uri = os.getenv("MONGO_URI")
 client = MongoClient(uri)
 db = client["Users"]
 collection = db["users"]
+
+async def create_pool():
+    params = config()
+    pool = await asyncpg.create_pool(**params, min_size=2, max_size=10)
+    print("Connection pool created.")
+    return pool
 
 # Send a ping to confirm a successful connection
 try:
@@ -135,36 +143,37 @@ bot.runes_mapping = runes_mapping
 bot.summs_mapping = summs_mapping
 
 # Take a snapshot of games and LP for !today command
-async def scheduler():
-    """Runs the scheduled task at 1 AM EST every day."""
-    await bot.wait_until_ready()  # Ensure bot is fully loaded before running the task
+async def scheduler(pool, interval_minutes=5):
+    """Runs the scheduled task every N minutes in the background."""
+    await bot.wait_until_ready()
     eastern = pytz.timezone("America/New_York")
 
+    print(f"Background scheduler started. Updating every {interval_minutes} minutes.")
+    
     while not bot.is_closed():
-        now = datetime.datetime.now(eastern)
-        target_time = now.replace(hour=1, minute=0, second=0, microsecond=0)
+        start_time = datetime.datetime.now(eastern).strftime("%Y-%m-%d %H:%M:%S %Z")
+        try:
+            async with pool.acquire() as conn:
+                await helpers.update_db_games(conn, tft_token, lol_token)
+            print(f"Updated games at {start_time}")
+        except Exception as e:
+            print(f"Scheduler failed at {start_time}: {e}")
 
-        if now > target_time:
-            target_time += datetime.timedelta(days=1)  # Schedule for next day if already past 1 AM
-
-        wait_time = (target_time - now).total_seconds()
-
-        await asyncio.sleep(wait_time)  # Wait until 1 AM EST
-        await helpers.daily_store_stats(collection, tft_token)  # Run the task
-        print("Updated elo and games using scheduler. Time: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        await asyncio.sleep(interval_minutes * 60)
 
 # Show bot is online and invoke scheduled snapshot functionality
 @bot.event
 async def on_ready():
-    bot.loop.create_task(scheduler())  # Start the scheduler in the background
+    pool = await create_pool()
+    bot.loop.create_task(scheduler(pool, interval_minutes=5))
     try:
-        # Load the commands cog after the bot is ready
-        await bot.load_extension('commands')  # Make sure this is awaited
+        await bot.load_extension('commands')
         await bot.tree.sync()
         print(f"Synced slash commands for {bot.user}")
     except Exception as e:
         print(f"Failed to load extension: {e}")
-    print(f'Bot is online as {bot.user}')
+
+    print(f'🤖 Bot is online as {bot.user}')
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -176,14 +185,4 @@ async def on_command(ctx):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Command used: {ctx.command} at {timestamp}")
 
-# Only uncomment to manually run snapshot function
-# asyncio.run(helpers.daily_store_stats(collection, tft_token))
-
-# Only uncomment to manually run function to get all set placements (WORK IN PROGRESS, NOT FULLY WORKING YET)
-# asyncio.run(helpers.get_all_set_placements(collection, region, tft_token))
-
-# Only uncomment to fully reset database, do at start of set
-# asyncio.run(helpers.reset_database(collection))
-
-# Run the bot with your token
 bot.run(bot_token)
