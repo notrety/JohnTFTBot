@@ -113,8 +113,9 @@ async def update_ranks(pool, tft_token, lol_token):
 
 async def update_user_games(pool, user_id, tft_token, lol_token):
     async with pool.acquire() as conn:
+
         user = await conn.fetchrow('''
-            SELECT discord_id, game_name, tft_puuid, league_puuid, region, mass_region
+            SELECT *
             FROM users
             WHERE discord_id = $1
         ''', user_id)
@@ -165,7 +166,6 @@ async def update_user_games(pool, user_id, tft_token, lol_token):
                 INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
                 VALUES ($1, $2, $3, $4);
             ''', user_id, timestamp, current_lol_lp, current_tft_lp)
-
         else:
             # No LP change — update timestamp of most recent snapshot
             if last_snapshot:
@@ -178,7 +178,6 @@ async def update_user_games(pool, user_id, tft_token, lol_token):
                 ''', new_timestamp, user_id, last_snapshot['update_time'])
 
     print("User game updates and LP snapshot completed.")
-
 
 async def add_new_match(conn, puuid, game, mass_region, token, match_list):
     if not match_list:
@@ -395,6 +394,13 @@ def get_summs_icon(summs_json, summonerId):
     print(f"{summ} Not Found")
     return None 
 
+async def get_pfp(region, puuid, lol_token):
+    async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
+        profile = await client.get_lol_summoner_v4_by_puuid(region=region, puuid=puuid)
+        pfp_id = profile['profileIconId']
+        url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/profile-icons/{pfp_id}.jpg"
+        return url
+
 def center_square_crop(image: Image.Image) -> Image.Image:
     w, h = image.size
     min_side = min(w, h)
@@ -463,23 +469,6 @@ async def get_puuid(gameName, tagLine, mass_region, riot_token):
     except Exception as err:
         print(f"Failed to retrieve PUUID for {gameName}#{tagLine}.{err}")
         return None
-
-async def get_last_game_companion(name, tagLine, mass_region, tft_token):
-    gameName = name.replace("_", " ")
-    puuid = await get_puuid(gameName, tagLine, mass_region, tft_token)
-    if not puuid:
-        return None, f"Could not find PUUID for {gameName}#{tagLine}."
-
-    try:
-        async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
-            match = await client.get_tft_match_v1_match_ids_by_puuid(region = mass_region, puuid=puuid, queries= {"start": 0, "count": 1}) # Grabbing last match 
-            match_info = await client.get_tft_match_v1_match(region = mass_region, id = match[0])
-        for participant in match_info['info']['participants']:
-            if participant['puuid'] == puuid:
-                return participant['companion']['content_ID']
-            
-    except Exception as err:
-        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
 
 # Function to calculate ranked elo based on given PUUID
 async def calculate_elo(puuid, game, token, region):
@@ -1214,7 +1203,6 @@ async def check_data(id, pool, game):
             FROM users
             WHERE discord_id = $1
         ''', user_id)
-    print(f"Found data for {user_id}")
     if row:
         gameName = row['game_name']
         tagLine = row['tag_line']

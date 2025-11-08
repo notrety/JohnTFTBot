@@ -653,7 +653,7 @@ class BotCommands(commands.Cog):
         # await ctx.send(files=[final_file], embeds=[tab_embed],view=ToggleTeamView(0))
         await ctx.send(files=[final_file,blue_file,red_file], embeds=[tab_embed, blue_embed, red_embed])
 
-    @commands.command(nmame="todayleague", aliases=["tl","lt"])
+    @commands.command(name="todayleague", aliases=["tl","lt"])
     async def today_league(self, ctx, *args):
         mappings = {
             "lol_item_mapping": self.lol_item_mapping,     # item ID → icon path
@@ -665,38 +665,94 @@ class BotCommands(commands.Cog):
         game_num, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         if not game_num:
             game_num = 0
-
         if user_id:
+            user_id = int(user_id)
             data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "League")
         else:
-            region = self.region
-            mass_region = self.mass_region
-            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.lol_token)
-            if not puuid:
-                print(f"Could not find PUUID for {gameName}#{tagLine}.")
-                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            return f"Must be a linked user to use this command.", None, None
 
         background_color = (0,0,0,0)
-
-        error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
-        if error:
-            return error, None, None, None, None, None, None, None, None
         
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+        eastern = pytz.timezone("US/Eastern")
+        now = datetime.now(eastern)
+        today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
+        cutoff = int(today_6am.timestamp())
+        print(cutoff)
+        async with self.pool.acquire() as conn:
+            user_row = await conn.fetchrow('''
+                    SELECT league_puuid, region
+                    FROM users
+                    WHERE discord_id = $1;
+                ''', user_id)
+            
+            if not user_row:
+                    print(f"No user found with discord_id {user_id}")
+                    await ctx.send("❌ Could not find a linked TFT account for this user.")
+                    return
+            
+            rows = await conn.fetch('''
+                SELECT *
+                FROM league_games
+                WHERE league_puuid = $1
+                AND game_datetime >= $2
+                ORDER BY game_datetime DESC;
+            ''', user_row['league_puuid'], cutoff*1000)
 
-        # Filter matches that ended within the last 24 hours
-        recent_matches = [
-            match for match in match_ids
-            if datetime.fromtimestamp(match["timestamp"] / 1000, tz=timezone.utc) >= cutoff
-        ]
+            matches = [row['match_id'] for row in rows]
 
-        recent_matches = recent_matches[-10:]
+            first_snapshot = await conn.fetchrow('''
+                SELECT league_lp
+                FROM lp
+                WHERE discord_id = $1
+                AND update_time >= $2
+                ORDER BY update_time ASC
+                LIMIT 1;
+            ''', user_id, cutoff)
+
+            latest_snapshot = await conn.fetchrow('''
+                SELECT league_lp
+                FROM lp
+                WHERE discord_id = $1
+                ORDER BY update_time DESC
+                LIMIT 1;
+            ''', user_id)
+
+            league_diff = 0  
+            if first_snapshot and latest_snapshot:
+                league_diff = latest_snapshot['league_lp'] - first_snapshot['league_lp']
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['league_lp'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['league_lp'])
+
+        if league_diff < 0:
+            lp_diff_emoji = "📉"
+        else:
+            lp_diff_emoji = "📈"
+
+        url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
+        text = (
+            f"{dicts.tier_to_rank_icon[old_rank]} {old_rank} {old_tier} {old_lp} LP -> {dicts.tier_to_rank_icon[new_rank]} {new_rank} {new_tier} {new_lp} LP\n"
+            f"{lp_diff_emoji} **LP Difference:** {league_diff}\n"
+            f"📊 **Games Played:** {len(matches)}\n"
+        )
+
+        embed = discord.Embed(
+            description=text,
+            color=discord.Color.blue()
+        )
+        embed.set_author(
+            name=f"Today: {gameName}#{tagLine}",
+            url=f"https://op.gg/lol/summoners/{region[:-1]}/{gameName.replace(' ', '%20')}-{tagLine}",
+            icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250?cb=20191029062637"
+        )
+        embed.set_thumbnail(url=url)
+        embed.set_footer(text="Powered by Riot API | Data from League Ranked")
+        await ctx.send(embed=embed)
 
         results = []
         async with TaskGroup(asyncio.Semaphore(20)) as tg:
             tasks = []
-            for match in recent_matches:
-                match_id = match["match_id"]
+            for match_id in matches[:5]:
                 print(match_id)
 
                 task = await tg.create_task(
@@ -1062,6 +1118,7 @@ class BotCommands(commands.Cog):
         cutoff = int(today_6am.timestamp())
 
         if user_id:
+            user_id = int(user_id)
             data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
             region = self.region
@@ -1076,7 +1133,7 @@ class BotCommands(commands.Cog):
         async with self.pool.acquire() as conn:
             print("Running fetch with:", user_id, cutoff, type(cutoff))
             user_row = await conn.fetchrow('''
-                    SELECT tft_puuid
+                    SELECT league_puuid, tft_puuid, region
                     FROM users
                     WHERE discord_id = $1;
                 ''', user_id)
@@ -1125,6 +1182,7 @@ class BotCommands(commands.Cog):
             lp_diff_emoji = "📉"
         else:
             lp_diff_emoji = "📈"
+        url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
 
         total_placement = sum(placements)
         scores = " ".join(dicts.number_to_num_icon[placement] for placement in placements)
@@ -1148,10 +1206,7 @@ class BotCommands(commands.Cog):
             url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set15",
             icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
         )
-        companion_content_ID = await helpers.get_last_game_companion(gameName, tagLine, mass_region, self.tft_token)
-        companion_path = helpers.get_companion_icon(self.companion_mapping, companion_content_ID)
-        companion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/" + companion_path.lower()
-        embed.set_thumbnail(url=companion_url)
+        embed.set_thumbnail(url=url)
         embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
         await ctx.send(embed=embed)
 
