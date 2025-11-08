@@ -678,14 +678,12 @@ class BotCommands(commands.Cog):
         now = datetime.now(eastern)
         today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
         cutoff = int(today_6am.timestamp())
-        print(cutoff)
         async with self.pool.acquire() as conn:
             user_row = await conn.fetchrow('''
                     SELECT league_puuid, region
                     FROM users
                     WHERE discord_id = $1;
                 ''', user_id)
-            
             if not user_row:
                     print(f"No user found with discord_id {user_id}")
                     await ctx.send("❌ Could not find a linked TFT account for this user.")
@@ -710,6 +708,17 @@ class BotCommands(commands.Cog):
                 LIMIT 1;
             ''', user_id, cutoff)
 
+            # If no LP snapshot after cutoff, get the *latest* one before it
+            if not first_snapshot:
+                first_snapshot = await conn.fetchrow('''
+                    SELECT league_lp
+                    FROM lp
+                    WHERE discord_id = $1
+                    AND update_time < $2
+                    ORDER BY update_time DESC
+                    LIMIT 1;
+                ''', user_id, cutoff)
+
             latest_snapshot = await conn.fetchrow('''
                 SELECT league_lp
                 FROM lp
@@ -723,6 +732,8 @@ class BotCommands(commands.Cog):
                 league_diff = latest_snapshot['league_lp'] - first_snapshot['league_lp']
                 old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['league_lp'])
                 new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['league_lp'])
+            else:
+                print("Missing snapshot(s)")
 
         if league_diff < 0:
             lp_diff_emoji = "📉"
@@ -731,7 +742,8 @@ class BotCommands(commands.Cog):
 
         url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
         text = (
-            f"{dicts.tier_to_rank_icon[old_rank]} {old_rank} {old_tier} {old_lp} LP -> {dicts.tier_to_rank_icon[new_rank]} {new_rank} {new_tier} {new_lp} LP\n"
+            f"{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP "
+            f"→ {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP\n"
             f"{lp_diff_emoji} **LP Difference:** {league_diff}\n"
             f"📊 **Games Played:** {len(matches)}\n"
         )
@@ -753,7 +765,6 @@ class BotCommands(commands.Cog):
         async with TaskGroup(asyncio.Semaphore(20)) as tg:
             tasks = []
             for match_id in matches[:5]:
-                print(match_id)
 
                 task = await tg.create_task(
                     helpers.league_last_match(

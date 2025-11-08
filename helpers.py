@@ -190,10 +190,12 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
 
     async with RiotAPIClient(default_headers={'X-Riot-Token': token}) as client:
         for match_id in match_list:
+            print(f"Attempting to add {game} match id {match_id} for {puuid}")
             if game == 'TFT':
                 match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
                 queue_id = match_info['info'].get('queue_id')
                 if queue_id != target_queues['TFT']:
+                    print(f"{game} match id {match_id} not ranked")
                     continue
 
                 game_datetime = match_info['info']['game_datetime']
@@ -214,6 +216,7 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
                 match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
                 queue_id = match_info['info'].get('queueId')
                 if queue_id != target_queues['League']:
+                    print(f"{game} match id {match_id} not ranked")
                     continue
 
                 game_datetime = match_info['info']['gameEndTimestamp']
@@ -232,44 +235,32 @@ async def find_missing_games(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
 
         rows = await conn.fetch('''
-        WITH last_tft AS (
-            SELECT DISTINCT ON (tft_puuid)
-                tft_puuid, game_datetime
-            FROM tft_games
-            ORDER BY tft_puuid, game_datetime DESC
-        ),
-        last_lol AS (
-            SELECT DISTINCT ON (league_puuid)
-                league_puuid, game_datetime
-            FROM league_games
-            ORDER BY league_puuid, game_datetime DESC
+        WITH last_lp AS (
+            SELECT DISTINCT ON (discord_id)
+                discord_id,
+                update_time,
+                tft_lp,
+                league_lp
+            FROM lp
+            ORDER BY discord_id, update_time DESC
         )
         SELECT
+            u.discord_id,
             u.game_name,
             u.tft_puuid,
             u.league_puuid,
             u.mass_region,
-            t.game_datetime AS tft_last_game,
-            l.game_datetime AS lol_last_game
+            lp.update_time AS last_update_time
         FROM users u
-        LEFT JOIN last_tft t ON u.tft_puuid = t.tft_puuid
-        LEFT JOIN last_lol l ON u.league_puuid = l.league_puuid;
+        LEFT JOIN last_lp lp ON u.discord_id = lp.discord_id;
         ''')
 
         for row in rows:
-            if row['tft_last_game']:
-                tft_timestamp = row['tft_last_game']
-            else:
-                tft_timestamp = set_15_unix
+            timestamp = row['last_update_time']
 
-            if row['lol_last_game']:
-                league_timestamp = row['lol_last_game']
-            else:
-                league_timestamp = season_15_unix
+            err, tft_match_list = await find_all_match_ids(row['tft_puuid'], "TFT", row["mass_region"], tft_token, timestamp=timestamp)
 
-            err, tft_match_list = await find_all_match_ids(row['tft_puuid'], "TFT", row["mass_region"], tft_token, timestamp=tft_timestamp)
-
-            err, lol_match_list = await find_all_match_ids(row['league_puuid'], "League", row["mass_region"], lol_token, timestamp=league_timestamp)
+            err, lol_match_list = await find_all_match_ids(row['league_puuid'], "League", row["mass_region"], lol_token, timestamp=timestamp)
 
             if tft_match_list:
                 await add_new_match(conn, row['tft_puuid'], "TFT", row["mass_region"], tft_token, tft_match_list)
@@ -607,7 +598,7 @@ async def find_all_match_ids(puuid, game, mass_region, token, timestamp):
 
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": token}) as client:
-            while True:
+            while counter < 1000:
                 if game == "TFT":
                     if timestamp:
                         matches = await client.get_tft_match_v1_match_ids_by_puuid(
