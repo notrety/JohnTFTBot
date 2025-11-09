@@ -70,6 +70,17 @@ async def update_db_games(pool, tft_token, lol_token):
                     INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
                     VALUES ($1, $2, $3, $4);
                 ''', discord_id, timestamp, current_lol_lp, current_tft_lp)
+            else:
+                if last_snapshot:
+                    new_timestamp = int(time.time())
+                    await conn.execute('''
+                        UPDATE lp
+                        SET update_time = $1
+                        WHERE discord_id = $2
+                        AND update_time = $3;
+                    ''', new_timestamp, discord_id, last_snapshot['update_time'])
+
+                print(f"No LP change for {discord_id}")
 
     print("Game updates and LP snapshots completed.")
 
@@ -107,6 +118,15 @@ async def update_ranks(pool, tft_token, lol_token):
 
                 print(f"LP updated for {discord_id}: TFT={current_tft_lp}, LoL={current_lol_lp}")
             else:
+                if last_snapshot:
+                    new_timestamp = int(time.time())
+                    await conn.execute('''
+                        UPDATE lp
+                        SET update_time = $1
+                        WHERE discord_id = $2
+                        AND update_time = $3;
+                    ''', new_timestamp, discord_id, last_snapshot['update_time'])
+
                 print(f"No LP change for {discord_id}")
 
     print("Ranks updated")

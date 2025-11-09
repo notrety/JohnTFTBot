@@ -738,6 +738,7 @@ class BotCommands(commands.Cog):
         if league_diff < 0:
             lp_diff_emoji = "📉"
         else:
+            league_diff = "+" + str(league_diff)
             lp_diff_emoji = "📈"
 
         url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
@@ -794,6 +795,99 @@ class BotCommands(commands.Cog):
             await ctx.send(files=files, embeds=embeds)
         else:
             await ctx.send("No valid matches to display.")
+
+    @commands.command(name="leaguesummary", aliases=["lsum","suml"])
+    async def league_summary(self, ctx, *args):
+        # await helpers.update_db_games(self.pool, self.tft_token, self.lol_token) # uncomment after speeding up update_db_games
+        eastern = pytz.timezone("US/Eastern")
+        now = datetime.now(eastern)
+        today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
+        cutoff = int(today_6am.timestamp())
+
+        guild = ctx.guild
+        members = [member.id async for member in guild.fetch_members(limit=None)]
+        async with self.pool.acquire() as conn:
+            user_rows = await conn.fetch('''
+                    SELECT *
+                    FROM users
+                    WHERE discord_id = ANY($1)
+                ''', members)
+            final_str = []
+
+            for user_row in user_rows:
+                rows = await conn.fetch('''
+                    SELECT win_loss
+                    FROM league_games
+                    WHERE league_puuid = $1
+                    AND game_datetime >= $2
+                    ORDER BY game_datetime DESC;
+                ''', user_row['league_puuid'], cutoff*1000)
+
+                matches = [row['win_loss'] for row in rows]
+                
+                if matches:
+
+                    wins = sum(matches)
+                    user_id = user_row['discord_id']
+                    first_snapshot = await conn.fetchrow('''
+                        SELECT league_lp
+                        FROM lp
+                        WHERE discord_id = $1
+                        AND update_time >= $2
+                        ORDER BY update_time ASC
+                        LIMIT 1;
+                    ''', user_id, cutoff)
+
+                    # If no LP snapshot after cutoff, get the *latest* one before it
+                    if not first_snapshot:
+                        first_snapshot = await conn.fetchrow('''
+                            SELECT league_lp
+                            FROM lp
+                            WHERE discord_id = $1
+                            AND update_time < $2
+                            ORDER BY update_time DESC
+                            LIMIT 1;
+                        ''', user_id, cutoff)
+
+                    latest_snapshot = await conn.fetchrow('''
+                        SELECT league_lp
+                        FROM lp
+                        WHERE discord_id = $1
+                        ORDER BY update_time DESC
+                        LIMIT 1;
+                    ''', user_id)
+
+                    league_diff = 0  
+                    if first_snapshot and latest_snapshot:
+                        league_diff = latest_snapshot['league_lp'] - first_snapshot['league_lp']
+                        old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['league_lp'])
+                        new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['league_lp'])
+                    else:
+                        print("Missing snapshot(s)")
+
+                    if league_diff < 0:
+                        lp_diff_emoji = "📉"
+                    else:
+                        lp_diff_emoji = "📈"
+                    league_diff_str = f"+{league_diff}" if league_diff >= 0 else str(league_diff)
+
+                    text = f"""
+                    {user_row['game_name']}#{user_row['tag_line']}
+                    {dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP → {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP
+                    {lp_diff_emoji}LP: {league_diff_str}
+                    🏆Record: {wins} - {len(matches) - wins} 
+                    """
+                    final_str.append(text)
+        description = "".join(final_str)
+
+        embed = discord.Embed(
+            title="League Server Summary",
+            description=description,
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed)
+
+
 
     # Redirect user to /link
     @commands.command()
@@ -856,7 +950,6 @@ class BotCommands(commands.Cog):
             await interaction.response.send_message(
                 f"Your data has been linked: {name}#{tag} in region {region}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
                 ephemeral=True
-                
             )
 
     # Command to check leaderboard of all linked accounts for ranked tft
@@ -1192,6 +1285,7 @@ class BotCommands(commands.Cog):
         if tft_diff < 0:
             lp_diff_emoji = "📉"
         else:
+            tft_diff = "+" + str(tft_diff)
             lp_diff_emoji = "📈"
         url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
 
