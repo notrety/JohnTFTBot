@@ -698,6 +698,8 @@ class BotCommands(commands.Cog):
             ''', user_row['league_puuid'], cutoff*1000)
 
             matches = [row['match_id'] for row in rows]
+            matches_outcomes = [row['win_loss'] for row in rows]
+            wins = sum(matches_outcomes)
 
             first_snapshot = await conn.fetchrow('''
                 SELECT league_lp
@@ -746,7 +748,7 @@ class BotCommands(commands.Cog):
             f"{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP "
             f"→ {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP\n"
             f"{lp_diff_emoji} **LP Difference:** {league_diff}\n"
-            f"📊 **Games Played:** {len(matches)}\n"
+            f"🏆**Record:** {wins} - {len(matches) - wins}"
         )
 
         embed = discord.Embed(
@@ -798,12 +800,11 @@ class BotCommands(commands.Cog):
 
     @commands.command(name="leaguesummary", aliases=["lsum","suml"])
     async def league_summary(self, ctx, *args):
-        # await helpers.update_db_games(self.pool, self.tft_token, self.lol_token) # uncomment after speeding up update_db_games
+        await helpers.update_db_games(self.pool, self.tft_token, self.lol_token)
         eastern = pytz.timezone("US/Eastern")
         now = datetime.now(eastern)
         today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
         cutoff = int(today_6am.timestamp())
-
         guild = ctx.guild
         members = [member.id async for member in guild.fetch_members(limit=None)]
         async with self.pool.acquire() as conn:
@@ -871,12 +872,12 @@ class BotCommands(commands.Cog):
                         lp_diff_emoji = "📈"
                     league_diff_str = f"+{league_diff}" if league_diff >= 0 else str(league_diff)
 
-                    text = f"""
-                    {user_row['game_name']}#{user_row['tag_line']}
-                    {dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP → {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP
-                    {lp_diff_emoji}LP: {league_diff_str}
-                    🏆Record: {wins} - {len(matches) - wins} 
-                    """
+                    text = (
+                    f"**{user_row['game_name']}#{user_row['tag_line']}**\n"
+                    f"**{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP → {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP**\n"
+                    f"**{lp_diff_emoji}LP: {league_diff_str}**\n"
+                    f"🏆**Record:** {wins} - {len(matches) - wins}" 
+                    )
                     final_str.append(text)
         description = "".join(final_str)
 
@@ -886,8 +887,6 @@ class BotCommands(commands.Cog):
             color=discord.Color.blue()
         )
         await ctx.send(embed=embed)
-
-
 
     # Redirect user to /link
     @commands.command()

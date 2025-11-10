@@ -7,6 +7,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
+from pulsefire.taskgroups import TaskGroup
 import os
 import hashlib
 
@@ -18,71 +19,13 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 async def update_db_games(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
-        users = await conn.fetch('SELECT discord_id, game_name, tft_puuid, league_puuid, region, mass_region FROM users;')
-
+        users = await conn.fetch('SELECT discord_id FROM users;')
+    
+    async with TaskGroup(asyncio.Semaphore(10)) as tg:
         for user in users:
-            discord_id = user['discord_id']
-            mass_region = user['mass_region']
+            await tg.create_task(update_user_games(pool, int(user['discord_id']), tft_token, lol_token))
 
-            # Fetch current LPs
-            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, user['region'])
-            current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, user['region'])
-
-            # Get the most recent snapshot (if any)
-            last_snapshot = await conn.fetchrow('''
-                SELECT update_time, league_lp, tft_lp
-                FROM lp
-                WHERE discord_id = $1
-                ORDER BY update_time DESC
-                LIMIT 1;
-            ''', discord_id)
-
-            lp_changed = (
-                last_snapshot is None or
-                last_snapshot['tft_lp'] != current_tft_lp or
-                last_snapshot['league_lp'] != current_lol_lp
-            )
-
-            # Only update matches and insert a new snapshot if LP changed
-            if lp_changed:
-                print(f"🆕 Rank change detected for {user['game_name']}")
-
-                timestamp = int(time.time())
-
-                # TFT update
-                if last_snapshot and last_snapshot['tft_lp'] != current_tft_lp:
-                    err, tft_match_list = await find_all_match_ids(
-                        user['tft_puuid'], "TFT", mass_region, tft_token, last_snapshot['update_time']
-                    )
-                    if tft_match_list:
-                        await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list)
-
-                # League update
-                if last_snapshot and last_snapshot['league_lp'] != current_lol_lp:
-                    err, lol_match_list = await find_all_match_ids(
-                        user['league_puuid'], "League", mass_region, lol_token, last_snapshot['update_time']
-                    )
-                    if lol_match_list:
-                        await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
-
-                # Append new LP snapshot
-                await conn.execute('''
-                    INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
-                    VALUES ($1, $2, $3, $4);
-                ''', discord_id, timestamp, current_lol_lp, current_tft_lp)
-            else:
-                if last_snapshot:
-                    new_timestamp = int(time.time())
-                    await conn.execute('''
-                        UPDATE lp
-                        SET update_time = $1
-                        WHERE discord_id = $2
-                        AND update_time = $3;
-                    ''', new_timestamp, discord_id, last_snapshot['update_time'])
-
-                print(f"No LP change for {discord_id}")
-
-    print("Game updates and LP snapshots completed.")
+    print("User games updated.")
 
 async def update_ranks(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
