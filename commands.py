@@ -876,8 +876,8 @@ class BotCommands(commands.Cog):
                     league_diff_str = f"+{league_diff}" if league_diff >= 0 else str(league_diff)
                     text = (
                         f"**{user_row['game_name']}#{user_row['tag_line']}**\n"
-                        f"{dicts.tier_to_rank_icon.get(old_rank, '')} **{old_rank} {old_tier} {old_lp} LP → "
-                        f"{dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP**\n"
+                        f"{dicts.tier_to_rank_icon.get(old_rank, '')} **{dicts.rank_to_acronym(old_rank)} {dicts.rank_to_number(old_tier)} {old_lp} LP → "
+                        f"{dicts.tier_to_rank_icon.get(new_rank, '')} {dicts.rank_to_acronym(new_rank)} {dicts.rank_to_number(new_tier)} {new_lp} LP**\n"
                         f"**{lp_diff_emoji} LP: {league_diff_str}**\n"
                         f"🏆 **Record:** {wins} - {len(matches) - wins}\n"
                     )
