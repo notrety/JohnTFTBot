@@ -674,10 +674,14 @@ class BotCommands(commands.Cog):
         background_color = (0,0,0,0)
         
         await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
-        eastern = pytz.timezone("US/Eastern")
+        eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
-        today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
+        today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now < today_6am:
+            today_6am -= timedelta(days=1)
+
         cutoff = int(today_6am.timestamp())
+
         async with self.pool.acquire() as conn:
             user_row = await conn.fetchrow('''
                     SELECT league_puuid, region
@@ -801,10 +805,13 @@ class BotCommands(commands.Cog):
     @commands.command(name="leaguesummary", aliases=["lsum","suml"])
     async def league_summary(self, ctx, *args):
         await helpers.update_db_games(self.pool, self.tft_token, self.lol_token)
-        eastern = pytz.timezone("US/Eastern")
+        eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
-        today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
+        today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now < today_6am:
+            today_6am -= timedelta(days=1)
         cutoff = int(today_6am.timestamp())
+
         guild = ctx.guild
         members = [member.id async for member in guild.fetch_members(limit=None)]
         async with self.pool.acquire() as conn:
@@ -814,7 +821,6 @@ class BotCommands(commands.Cog):
                     WHERE discord_id = ANY($1)
                 ''', members)
             final_str = []
-
             for user_row in user_rows:
                 rows = await conn.fetch('''
                     SELECT win_loss
@@ -825,9 +831,7 @@ class BotCommands(commands.Cog):
                 ''', user_row['league_puuid'], cutoff*1000)
 
                 matches = [row['win_loss'] for row in rows]
-                
                 if matches:
-
                     wins = sum(matches)
                     user_id = user_row['discord_id']
                     first_snapshot = await conn.fetchrow('''
@@ -839,7 +843,6 @@ class BotCommands(commands.Cog):
                         LIMIT 1;
                     ''', user_id, cutoff)
 
-                    # If no LP snapshot after cutoff, get the *latest* one before it
                     if not first_snapshot:
                         first_snapshot = await conn.fetchrow('''
                             SELECT league_lp
@@ -871,15 +874,16 @@ class BotCommands(commands.Cog):
                     else:
                         lp_diff_emoji = "📈"
                     league_diff_str = f"+{league_diff}" if league_diff >= 0 else str(league_diff)
-
                     text = (
-                    f"**{user_row['game_name']}#{user_row['tag_line']}**\n"
-                    f"**{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP → {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP**\n"
-                    f"**{lp_diff_emoji}LP: {league_diff_str}**\n"
-                    f"🏆**Record:** {wins} - {len(matches) - wins}" 
+                        f"**{user_row['game_name']}#{user_row['tag_line']}**\n"
+                        f"{dicts.tier_to_rank_icon.get(old_rank, '')} **{old_rank} {old_tier} {old_lp} LP → "
+                        f"{dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP**\n"
+                        f"**{lp_diff_emoji} LP: {league_diff_str}**\n"
+                        f"🏆 **Record:** {wins} - {len(matches) - wins}\n"
                     )
                     final_str.append(text)
-        description = "".join(final_str)
+
+        description = "\n".join(final_str)
 
         embed = discord.Embed(
             title="League Server Summary",
@@ -1215,9 +1219,11 @@ class BotCommands(commands.Cog):
     async def today(self, ctx, *args): 
         # Account must be linked for this command
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
-        eastern = pytz.timezone("US/Eastern")
+        eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
-        today_6am = eastern.localize(datetime(now.year, now.month, now.day, 6, 0))
+        today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now < today_6am:
+            today_6am -= timedelta(days=1)
         cutoff = int(today_6am.timestamp())
 
         if user_id:

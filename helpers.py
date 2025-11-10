@@ -75,73 +75,86 @@ async def update_ranks(pool, tft_token, lol_token):
     print("Ranks updated")
 
 async def update_user_games(pool, user_id, tft_token, lol_token):
-    async with pool.acquire() as conn:
+    try:
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow('''
+                SELECT *
+                FROM users
+                WHERE discord_id = $1
+            ''', user_id)
 
-        user = await conn.fetchrow('''
-            SELECT *
-            FROM users
-            WHERE discord_id = $1
-        ''', user_id)
+            if not user:
+                print(f"[WARN] No user found with discord_id={user_id}")
+                return
 
-        if not user:
-            print(f"No user found with discord_id={user_id}")
-            return
+            region = user['region']
+            mass_region = user['mass_region']
 
-        mass_region = user['mass_region']
+            # Fetch current LPs
+            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, region)
+            current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, region)
 
-        current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, user['region'])
-        current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, user['region'])
+            # Get most recent snapshot
+            last_snapshot = await conn.fetchrow('''
+                SELECT update_time, league_lp, tft_lp
+                FROM lp
+                WHERE discord_id = $1
+                ORDER BY update_time DESC
+                LIMIT 1;
+            ''', user_id)
 
-        last_snapshot = await conn.fetchrow('''
-            SELECT update_time, league_lp, tft_lp
-            FROM lp
-            WHERE discord_id = $1
-            ORDER BY update_time DESC
-            LIMIT 1;
-        ''', user_id)
+            lp_changed = (
+                last_snapshot is None or
+                last_snapshot['tft_lp'] != current_tft_lp or
+                last_snapshot['league_lp'] != current_lol_lp
+            )
 
-        lp_changed = (
-            last_snapshot is None or
-            last_snapshot['tft_lp'] != current_tft_lp or
-            last_snapshot['league_lp'] != current_lol_lp
-        )
+            if lp_changed:
+                print(f"[INFO] Rank change detected for {user['game_name']}")
 
-        if lp_changed:
-            print(f"Rank change detected for {user['game_name']}")
+                timestamp = int(time.time())
 
-            timestamp = int(time.time())
+                # TFT updates
+                if last_snapshot and last_snapshot['tft_lp'] != current_tft_lp:
+                    err, tft_match_list = await find_all_match_ids(
+                        user['tft_puuid'], "TFT", mass_region, tft_token, last_snapshot['update_time']
+                    )
+                    if tft_match_list:
+                        await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list)
 
-            if last_snapshot and last_snapshot['tft_lp'] != current_tft_lp:
-                err, tft_match_list = await find_all_match_ids(
-                    user['tft_puuid'], "TFT", mass_region, tft_token, last_snapshot['update_time']
-                )
-                if tft_match_list:
-                    await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list)
+                # League updates
+                if last_snapshot and last_snapshot['league_lp'] != current_lol_lp:
+                    err, lol_match_list = await find_all_match_ids(
+                        user['league_puuid'], "League", mass_region, lol_token, last_snapshot['update_time']
+                    )
+                    if lol_match_list:
+                        await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
 
-            if last_snapshot and last_snapshot['league_lp'] != current_lol_lp:
-                err, lol_match_list = await find_all_match_ids(
-                    user['league_puuid'], "League", mass_region, lol_token, last_snapshot['update_time']
-                )
-                if lol_match_list:
-                    await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
-
-            await conn.execute('''
-                INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
-                VALUES ($1, $2, $3, $4);
-            ''', user_id, timestamp, current_lol_lp, current_tft_lp)
-        else:
-            # No LP change — update timestamp of most recent snapshot
-            if last_snapshot:
-                new_timestamp = int(time.time())
+                # Insert new LP snapshot
                 await conn.execute('''
-                    UPDATE lp
-                    SET update_time = $1
-                    WHERE discord_id = $2
-                    AND update_time = $3;
-                ''', new_timestamp, user_id, last_snapshot['update_time'])
+                    INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
+                    VALUES ($1, $2, $3, $4);
+                ''', user_id, timestamp, current_lol_lp, current_tft_lp)
 
-    print("User game updates and LP snapshot completed.")
+            else:
+                # No LP change — just refresh snapshot timestamp
+                if last_snapshot:
+                    new_timestamp = int(time.time())
+                    await conn.execute('''
+                        UPDATE lp
+                        SET update_time = $1
+                        WHERE discord_id = $2
+                        AND update_time = $3;
+                    ''', new_timestamp, user_id, last_snapshot['update_time'])
 
+                print(f"[INFO] No LP change for {user['game_name']}")
+
+    except Exception as e:
+        print(f"[ERROR] update_user_games failed for {user_id}: {e}")
+
+    finally:
+        print(f"[DONE] Completed update for {user_id}")
+        
 async def add_new_match(conn, puuid, game, mass_region, token, match_list):
     if not match_list:
         return
