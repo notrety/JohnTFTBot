@@ -377,7 +377,6 @@ class BotCommands(commands.Cog):
                         view=PlayerSwitchView(new_index, self.author_id)
                     )
         # index, puuid, region, mass_region, match_id, tft_token, mappings
-        # --- Send Initial Message ---
         embed, file, _ = await helpers.generate_board_preview(current_index, puuid, region, mass_region, match_id, tft_token, mappings)
         await ctx.send(embed=embed, file=file, view=PlayerSwitchView(current_index, ctx.author.id))
         os.remove("player_board.png")
@@ -422,12 +421,22 @@ class BotCommands(commands.Cog):
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
             
         background_color = (0,0,0,0)
-
-        error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
-        if error:
-            return error, None, None, None, None, None, None, None, None
-
-        match_id = match_ids[game_num]['match_id']
+        if game_type == "Ranked Solo/Duo" and data:
+            await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow('''
+                    SELECT match_id
+                    FROM league_games
+                    WHERE league_puuid = $1
+                    ORDER BY game_datetime DESC
+                    OFFSET $2;
+                ''', puuid, game_num)
+                match_id = row['match_id']
+        else:
+            error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
+            if error:
+                return error, None, None, None, None, None, None, None, None
+            match_id = match_ids[game_num]['match_id']
 
         if not match_id:
             return f"No recent {game_type} matches found for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None
@@ -618,39 +627,6 @@ class BotCommands(commands.Cog):
             )
         red_embed.set_image(url="attachment://red_team.png")
 
-        # # --- Dropdown View ---
-        # class ToggleTeamView(discord.ui.View):
-        #     def __init__(self, mode):
-        #         super().__init__()
-        #         self.mode = mode
-
-        #     @discord.ui.select(
-        #         placeholder="Display Type", 
-        #         options=[
-        #             discord.SelectOption(label="Compact", value="0"),
-        #             discord.SelectOption(label="Full", value="1")
-        #         ], 
-        #         max_values= 1)
-            
-        #     async def switch_mode(self, interaction: discord.Interaction, select: discord.ui.Select):  
-
-        #         await interaction.response.defer()
-        #         new_mode = int(select.values[0])
-
-        #         if new_mode == 1:
-        #             await interaction.message.edit(
-        #                 files=[final_file,blue_file, red_file], 
-        #                 embeds=[tab_embed,blue_embed, red_embed],
-        #                 view=ToggleTeamView(new_mode)
-        #             )
-        #         elif new_mode == 0:
-        #             await interaction.message.edit(
-        #                 files=[final_file], 
-        #                 embeds=[tab_embed, red_embed],
-        #                 view=ToggleTeamView(new_mode)
-        #             )
-
-        # await ctx.send(files=[final_file], embeds=[tab_embed],view=ToggleTeamView(0))
         await ctx.send(files=[final_file,blue_file,red_file], embeds=[tab_embed, blue_embed, red_embed])
 
     @commands.command(name="todayleague", aliases=["tl","lt"])
@@ -1319,85 +1295,6 @@ class BotCommands(commands.Cog):
         embed.set_thumbnail(url=url)
         embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
         await ctx.send(embed=embed)
-
-    # Command to compare the profiles of two players
-    @commands.command(name="compare", aliases=["c"])
-    async def compare(self, ctx, *args): 
-        text = ""
-        data, error_message, p1_name, p1_tag, p1_region, p1_puuid, p2_name, p2_tag, p2_region, p2_puuid = await helpers.take_in_compare_args(args, self.collection, ctx.author.id, self.tft_token)
-        if data:
-            p1_gameName = p1_name.replace("_", " ")
-            p2_gameName = p2_name.replace("_", " ")
-            failedFetch = False
-            try:
-                p1_rank_info = await helpers.get_rank_info(p1_region, p1_puuid, self.tft_token)
-            except Exception as err:
-                error_message = f"Error fetching rank info for {p1_gameName}#{p1_tag}: {err}. "
-                failedFetch = True
-            try:
-                p2_rank_info = await helpers.get_rank_info(p2_region, p2_puuid, self.tft_token)
-            except Exception as err:
-                error_message += f"Error fetching rank info for {p2_gameName}#{p2_tag}: {err}."
-                failedFetch = True
-            if not failedFetch:
-                for p1_entry in p1_rank_info:
-                    if p1_entry['queueType'] == 'RANKED_TFT':
-                        p1_tier = p1_entry['tier']
-                        p1_rank = p1_entry['rank']
-                        p1_lp = p1_entry['leaguePoints']
-                        p1_total_games = p1_entry['wins'] + p1_entry['losses']
-                        p1_top_four_rate = round(p1_entry['wins'] / p1_total_games * 100, 2) if p1_total_games else 0
-                        p1_elo = dicts.rank_to_elo[p1_tier + " " + p1_rank] + int(p1_lp)
-                for p2_entry in p2_rank_info:
-                    if p2_entry['queueType'] == 'RANKED_TFT':
-                        p2_tier = p2_entry['tier']
-                        p2_rank = p2_entry['rank']
-                        p2_lp = p2_entry['leaguePoints']
-                        p2_total_games = p2_entry['wins'] + p2_entry['losses']
-                        p2_top_four_rate = round(p2_entry['wins'] / p2_total_games * 100, 2) if p2_total_games else 0
-                        p2_elo = dicts.rank_to_elo[p2_tier + " " + p2_rank] + int(p2_lp)
-                        
-                embed = discord.Embed(
-                    title=f"Comparing Profiles: {p1_gameName}#{p1_tag} and {p2_gameName}#{p2_tag}",
-                    color=discord.Color.blue()
-                )
-
-                # Row 1: rank
-                embed.add_field(name="🏆 Rank", value=f"{dicts.tier_to_rank_icon[p1_tier]} {p1_tier} {p1_rank} {p1_lp} LP", inline=True)
-                if p1_elo > p2_elo:
-                    vs_value = "⬅️"
-                elif p1_elo < p2_elo:
-                    vs_value = "➡️"
-                else:
-                    vs_value = "⚖️"
-                embed.add_field(name="\u200b", value=vs_value, inline=True)
-                embed.add_field(name="🏆 Rank", value=f"{dicts.tier_to_rank_icon[p2_tier]} {p2_tier} {p2_rank} {p2_lp} LP", inline=True)
-
-                # Row 2: top 4 rate
-                embed.add_field(name="🎯 Top 4 Rate", value=f"{p1_top_four_rate:.1f}%", inline=True)
-                if p1_top_four_rate > p2_top_four_rate:
-                    top4_value = "⬅️"
-                elif p1_top_four_rate < p2_top_four_rate:
-                    top4_value = "➡️"
-                else:
-                    top4_value = "⚖️"
-                embed.add_field(name="\u200b", value=top4_value, inline=True)
-                embed.add_field(name="🎯 Top 4 Rate", value=f"{p2_top_four_rate:.1f}%", inline=True)
-
-                # Row 3: games played
-                embed.add_field(name="📊 Total Games", value=str(p1_total_games), inline=True)
-                if p1_total_games > p2_total_games:
-                    tot_games_value = "⬅️"
-                elif p1_total_games < p2_total_games:
-                    tot_games_value = "➡️"
-                else:
-                    tot_games_value = "⚖️"
-                embed.add_field(name="\u200b", value=tot_games_value, inline=True)
-                embed.add_field(name="📊 Total Games", value=str(p2_total_games), inline=True)
-
-                await ctx.send(embed=embed)
-        await ctx.send(error_message)
-        return 
 
     # Command to check all available commands, update as new commands are added (list alphabetically)
     @commands.command(name="commands", aliases=["command"])
