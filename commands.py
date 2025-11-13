@@ -410,6 +410,7 @@ class BotCommands(commands.Cog):
         if not game_num:
             game_num = 0
 
+        data = False
         if user_id:
             data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "League")
         else:
