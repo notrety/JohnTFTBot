@@ -12,7 +12,7 @@ import os
 import hashlib
 
 CACHE_DIR = "image_cache"
-set_15_unix = 1753833600
+set_15_unix = 1764763200
 season_15_unix = 1736409600 + 10800
 
 os.makedirs(CACHE_DIR, exist_ok=True)

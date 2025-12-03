@@ -981,14 +981,14 @@ class BotCommands(commands.Cog):
             icon = dicts.tier_to_rank_icon[user_tier]
             if user_tier != "UNRANKED":
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set15): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
                 else:
-                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set15): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
             else:
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set15): {icon} {user_tier} {user_rank}**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank}**\n"
                 else:
-                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set15): {icon} {user_tier} {user_rank}\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank}\n"
         
         if server:
             embed_title= "Server TFT Ranked Leaderboard"

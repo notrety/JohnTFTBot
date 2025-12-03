@@ -42,7 +42,7 @@ if response.status_code == 200:
     sets_data = data.get("sets", {})  # Get the 'sets' dictionary, default to empty if not found
     
     # Change this property at start of each set
-    current_set = sets_data.get("15", {})
+    current_set = sets_data.get("16", {})
     
     # Access the 'champions' and 'traits' lists within current set
     champ_mapping = current_set.get("champions", [])  # Get the 'champions' list, default to empty list if not found
