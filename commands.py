@@ -407,7 +407,9 @@ class BotCommands(commands.Cog):
         }
 
         game_num, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
-        if not game_num:
+        if game_num:
+            game_num += 1
+        else:
             game_num = 0
 
         data = False
@@ -665,6 +667,7 @@ class BotCommands(commands.Cog):
                     FROM users
                     WHERE discord_id = $1;
                 ''', user_id)
+            
             if not user_row:
                     print(f"No user found with discord_id {user_id}")
                     await ctx.send("❌ Could not find a linked TFT account for this user.")
@@ -742,7 +745,7 @@ class BotCommands(commands.Cog):
             icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250?cb=20191029062637"
         )
         embed.set_thumbnail(url=url)
-        embed.set_footer(text="Powered by Riot API | Data from League Ranked")
+        embed.set_footer(text="Last five matches below")
         await ctx.send(embed=embed)
 
         results = []
@@ -1196,26 +1199,22 @@ class BotCommands(commands.Cog):
     async def today(self, ctx, *args): 
         # Account must be linked for this command
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
-        eastern = pytz.timezone("America/New_York")
-        now = datetime.now(eastern)
-        today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
-        if now < today_6am:
-            today_6am -= timedelta(days=1)
-        cutoff = int(today_6am.timestamp())
 
         if user_id:
             user_id = int(user_id)
             data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
-            region = self.region
-            mass_region = self.mass_region
-            puuid = await helpers.get_puuid(gameName, tagLine, mass_region, self.tft_token)
-            if not puuid:
-                print(f"Could not find PUUID for {gameName}#{tagLine}.")
-                return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
+            return f"Must be a linked user to use this command.", None, None
             
         await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
-        
+        eastern = pytz.timezone("America/New_York")
+        now = datetime.now(eastern)
+        today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now < today_6am:
+            today_6am -= timedelta(days=1)
+
+        cutoff = int(today_6am.timestamp())
+
         async with self.pool.acquire() as conn:
             print("Running fetch with:", user_id, cutoff, type(cutoff))
             user_row = await conn.fetchrow('''
@@ -1250,6 +1249,17 @@ class BotCommands(commands.Cog):
                 LIMIT 1;
             ''', user_id, cutoff)
 
+            # If no LP snapshot after cutoff, get the *latest* one before it
+            if not first_snapshot:
+                first_snapshot = await conn.fetchrow('''
+                    SELECT league_lp
+                    FROM lp
+                    WHERE discord_id = $1
+                    AND update_time < $2
+                    ORDER BY update_time DESC
+                    LIMIT 1;
+                ''', user_id, cutoff)
+
             latest_snapshot = await conn.fetchrow('''
                 SELECT tft_lp
                 FROM lp
@@ -1263,6 +1273,8 @@ class BotCommands(commands.Cog):
                 tft_diff = latest_snapshot['tft_lp'] - first_snapshot['tft_lp']
                 old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['tft_lp'])
                 new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['tft_lp'])
+            else:
+                print("Missing snapshot(s)")
 
         if tft_diff < 0:
             lp_diff_emoji = "📉"
@@ -1284,17 +1296,18 @@ class BotCommands(commands.Cog):
             f"⭐ **AVP:** {avg_placement}\n"
             f"🏅 **Scores: **{scores}"
         )
+
         embed = discord.Embed(
             description=text,
             color=discord.Color.blue()
         )
         embed.set_author(
             name=f"Today: {gameName}#{tagLine}",
-            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set15",
+            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set16",
             icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
         )
         embed.set_thumbnail(url=url)
-        embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
+        embed.set_footer(text="Last five matches below")
         await ctx.send(embed=embed)
 
     # Command to check all available commands, update as new commands are added (list alphabetically)

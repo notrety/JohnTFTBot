@@ -1363,14 +1363,14 @@ async def parse_args(ctx, args):
     
     if len(args) == 3: # <gameNum, username, tagline>
         if args[0].isdigit():
-            gameNum = int(args[0]) - 1 
+            gameNum = int(args[0])
             gameName, tagLine = args[1], args[2]
         else:
             return None, None, None, None, "Format should be <game #, username, tagline>"
         
     elif len(args) == 2 and args[1].startswith("<@"): # <gameNum, @mention>
         if args[0].isdigit():
-            gameNum = int(args[0]) - 1 
+            gameNum = int(args[0])
             user_id = args[1].strip("<@!>")
         else:
             return None, None, None, None, "Format should be <game #, @mention>"
@@ -1382,7 +1382,7 @@ async def parse_args(ctx, args):
         user_id = args[0].strip("<@!>")
 
     elif len(args) == 1 and args[0].isdigit(): # <gameNum>
-        gameNum = int(args[0]) - 1
+        gameNum = int(args[0])
         user_id = ctx.author.id
 
     elif len(args) == 0: # all defaults 
