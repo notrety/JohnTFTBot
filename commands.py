@@ -883,57 +883,83 @@ class BotCommands(commands.Cog):
         region="List of regions: BR1, EUN1, EUW1, JP1, KR1, LA1, LA2, NA1, OC1, TR1, RU, PH2, SG2, TH2, TW2, VN2"
     )
     async def slash_link(self, interaction: discord.Interaction, name: str, tag: str, region: str):
-        user_id = str(interaction.user.id)
+        user_id = interaction.user.id
+        region = region.lower()
+        mass_region = dicts.region_to_mass[region]
 
-        # Check if the user already has linked data
-        existing_user = self.collection.find_one({"discord_id": user_id})
-        mass_region = dicts.region_to_mass[region.lower()]
-        puuid = await helpers.get_puuid(name, tag, mass_region, self.tft_token)
-        
-        if existing_user:
-            # If user already has data, update it
-            if not puuid:
-                await interaction.response.send_message(
-                    f"Could not find {name}#{tag} in region {region}. Please re-link using the correct formatting of `/link <name> <tag>`.",
-                    ephemeral=True  # Sends the response privately to the user
-                )        
-                return
-            self.collection.update_one(
-                {"discord_id": user_id},
-                {"$set": {
-                    "name": name.lower().replace("_", " "),
-                    "tag": tag.lower(),
-                    "region": region.lower(),
-                    "mass_region": mass_region,
-                    "puuid": puuid
-                    }
-                }
-            )
+        tft_puuid = await helpers.get_puuid(name, tag, mass_region, self.tft_token)
+        lol_puuid = await helpers.get_puuid(name, tag, mass_region, self.lol_token)
+        if not tft_puuid or not lol_puuid:
             await interaction.response.send_message(
-                f"Your data has been updated to: {name}#{tag} in region {region}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
-                ephemeral=True  # Sends the response privately to the user
-            )        
-        else:
-            # If no data exists, insert a new document for the user
-            if not puuid:
-                await interaction.response.send_message(
-                    f"Could not find {name}#{tag} in region {region}. Please re-link using the correct formatting of `/link <name> <tag>`.",
-                    ephemeral=True  # Sends the response privately to the user
-                )        
-                return
-            
-            self.collection.insert_one({
-                "discord_id": user_id,
-                "name": name.lower().replace("_", " "),
-                "tag": tag.lower(),
-                "region": region.lower(),
-                "mass_region": mass_region,
-                "puuid": puuid
-            })
-            await interaction.response.send_message(
-                f"Your data has been linked: {name}#{tag} in region {region}. If this looks incorrect, please re-link using the correct formatting of `/link <name> <tag>`.",
+                f"Could not find {name}#{tag} in region {region}. "
+                "Please re-link using `/link <name> <tag>`.",
                 ephemeral=True
             )
+            return
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+
+                row = await conn.fetchrow(
+                    '''
+                    SELECT tft_puuid, league_puuid
+                    FROM users
+                    WHERE discord_id = $1
+                    ''',
+                    user_id
+                )
+
+                old_tft_puuid = row["tft_puuid"] if row else None
+                old_lol_puuid = row["league_puuid"] if row else None
+
+                if row:
+                    if old_tft_puuid and old_tft_puuid != tft_puuid:
+                        await conn.execute(
+                            'DELETE FROM tft_games WHERE tft_puuid = $1',
+                            old_tft_puuid
+                        )
+
+                    if old_lol_puuid and old_lol_puuid != lol_puuid:
+                        await conn.execute(
+                            'DELETE FROM league_games WHERE league_puuid = $1',
+                            old_lol_puuid
+                        )
+
+                await conn.execute(
+                    '''
+                    INSERT INTO users (
+                        discord_id,
+                        league_puuid,
+                        tft_puuid,
+                        game_name,
+                        tag_line,
+                        region,
+                        mass_region
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (discord_id)
+                    DO UPDATE SET
+                        league_puuid = EXCLUDED.league_puuid,
+                        tft_puuid = EXCLUDED.tft_puuid,
+                        game_name = EXCLUDED.game_name,
+                        tag_line = EXCLUDED.tag_line,
+                        region = EXCLUDED.region,
+                        mass_region = EXCLUDED.mass_region
+                    ''',
+                    user_id,
+                    lol_puuid,
+                    tft_puuid,
+                    name.lower().replace("_", " "),
+                    tag.lower(),
+                    region,
+                    mass_region
+                )
+        await interaction.response.send_message(
+            f"Your data has been linked/updated: {name}#{tag} in region {region}. "
+            "If this looks incorrect, re-link using `/link <name> <tag>`.",
+            ephemeral=True
+        )
+
 
     # Command to check leaderboard of all linked accounts for ranked tft
     @commands.command(name="lb", aliases=["leaderboard", "server", "serverlb"])
