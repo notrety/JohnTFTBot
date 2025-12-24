@@ -163,51 +163,58 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
         "TFT": dicts.game_type_to_id["Ranked"],
         "League": dicts.game_type_to_id["Ranked Solo/Duo"]
     }
+    try:
+        async with RiotAPIClient(default_headers={'X-Riot-Token': token}) as client:
+            for match_id in match_list:
+                print(f"Attempting to add {game} match id {match_id} for {puuid}")
+                if game == 'TFT':
+                    match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
+                    queue_id = match_info['info'].get('queue_id')
+                    if queue_id != target_queues['TFT']:
+                        print(f"{game} match id {match_id} not ranked")
+                        continue
 
-    async with RiotAPIClient(default_headers={'X-Riot-Token': token}) as client:
-        for match_id in match_list:
-            print(f"Attempting to add {game} match id {match_id} for {puuid}")
-            if game == 'TFT':
-                match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
-                queue_id = match_info['info'].get('queue_id')
-                if queue_id != target_queues['TFT']:
-                    print(f"{game} match id {match_id} not ranked")
-                    continue
+                    game_datetime = match_info['info']['game_datetime']
+                    participants = match_info['info']['participants']
 
-                game_datetime = match_info['info']['game_datetime']
-                participants = match_info['info']['participants']
-
-                for p in participants:
-                    if p['puuid'] == puuid:
-                        champions = [c['character_id'] for c in p['units']]
-                        items = [i for c in p['units'] for i in c['itemNames']]
-                        traits = [{"name": t["name"], "style": t["style"]} for t in p["traits"]]
-                        await conn.execute('''
+                    p = next((p for p in participants if p['puuid'] == puuid), None)
+                    if p:
+                        champions = [c['character_id'] for c in p.get('units', [])]
+                        items = [i for c in p.get('units', []) for i in c.get('itemNames', [])]
+                        traits = [{"name": t["name"], "style": t["style"]} for t in p.get("traits", [])]
+                        await conn.execute(
+                            '''
                             INSERT INTO tft_games (match_id, tft_puuid, game_datetime, placement, champions, items, traits, damage_dealt, level)
                             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                             ON CONFLICT (match_id, tft_puuid) DO NOTHING;
-                        ''', match_id, puuid, game_datetime, p['placement'], champions, items, traits, p['total_damage_to_players'], p['level'])
+                            ''',
+                            match_id, puuid, game_datetime, p['placement'], champions, items, traits,
+                            p['total_damage_to_players'], p['level']
+                        )
 
-            elif game == 'League':
-                match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
-                queue_id = match_info['info'].get('queueId')
-                if queue_id != target_queues['League']:
-                    print(f"{game} match id {match_id} not ranked")
-                    continue
+                elif game == 'League':
+                    match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
+                    queue_id = match_info['info'].get('queueId')
+                    if queue_id != target_queues['League']:
+                        print(f"{game} match id {match_id} not ranked")
+                        continue
 
-                game_datetime = match_info['info']['gameEndTimestamp']
-                participants = match_info['info']['participants']
-                for p in participants:
-                    if p['puuid'] == puuid:
-                        cs = p['totalMinionsKilled'] + p['neutralMinionsKilled']
-                        await conn.execute('''
-                            INSERT INTO league_games (match_id, league_puuid, game_datetime, win_loss, champion, kills, deaths, assists, cs, game_duration)
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                            ON CONFLICT (match_id, league_puuid) DO NOTHING;
-                        ''', match_id, puuid, game_datetime, p['win'], p['championName'], p['kills'], p['deaths'], p['assists'], cs, match_info['info']['gameDuration'])
-            print(f"Added {match_id} for {puuid}")
+                    game_datetime = match_info['info']['gameEndTimestamp']
+                    participants = match_info['info']['participants']
+                    for p in participants:
+                        if p['puuid'] == puuid:
+                            cs = p['totalMinionsKilled'] + p['neutralMinionsKilled']
+                            await conn.execute('''
+                                INSERT INTO league_games (match_id, league_puuid, game_datetime, win_loss, champion, kills, deaths, assists, cs, game_duration)
+                                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                                ON CONFLICT (match_id, league_puuid) DO NOTHING;
+                            ''', match_id, puuid, game_datetime, p['win'], p['championName'], p['kills'], p['deaths'], p['assists'], cs, match_info['info']['gameDuration'])
+                print(f"Inserting match {match_id}, placement {p['placement']}")
+    except Exception as e:
+        print(f"[ERROR] Failed to insert match {match_id}, placement {p['placement']}: {e}")
 
 async def find_missing_games(pool, tft_token, lol_token):
+    
     async with pool.acquire() as conn:
 
         rows = await conn.fetch('''
