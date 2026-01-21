@@ -77,6 +77,7 @@ async def update_ranks(pool, tft_token, lol_token):
 async def update_user_games(pool, user_id, tft_token, lol_token):
     try:
         async with pool.acquire() as conn:
+            user_id = int(user_id)
             user = await conn.fetchrow('''
                 SELECT *
                 FROM users

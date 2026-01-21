@@ -422,7 +422,7 @@ class BotCommands(commands.Cog):
             if not puuid:
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
-            
+        
         background_color = (0,0,0,0)
         if game_type == "Ranked Solo/Duo" and data:
             await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
@@ -883,7 +883,7 @@ class BotCommands(commands.Cog):
         region="List of regions: BR1, EUN1, EUW1, JP1, KR1, LA1, LA2, NA1, OC1, TR1, RU, PH2, SG2, TH2, TW2, VN2"
     )
     async def slash_link(self, interaction: discord.Interaction, name: str, tag: str, region: str):
-        user_id = interaction.user.id
+        user_id = int(interaction.user.id)
         region = region.lower()
         mass_region = dicts.region_to_mass[region]
 
