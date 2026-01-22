@@ -782,25 +782,36 @@ class BotCommands(commands.Cog):
         else:
             await ctx.send("No valid matches to display.")
 
-    @commands.command(name="leaguesummary", aliases=["lsum","suml"])
+    @commands.command(name="leaguesummary", aliases=["lsum","lsumw"])
     async def league_summary(self, ctx, *args):
-        await helpers.update_db_games(self.pool, self.tft_token, self.lol_token)
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
         today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
         if now < today_6am:
             today_6am -= timedelta(days=1)
+        if ctx.invoked_with == "lsumw":
+            today_6am -= timedelta(days=7)
         cutoff = int(today_6am.timestamp())
 
         guild = ctx.guild
         members = [member.id async for member in guild.fetch_members(limit=None)]
+        
+        entries = [];
         async with self.pool.acquire() as conn:
+
             user_rows = await conn.fetch('''
                     SELECT *
                     FROM users
                     WHERE discord_id = ANY($1)
                 ''', members)
-            final_str = []
+            
+            connected_ids = [row["discord_id"] for row in user_rows]
+
+            async with TaskGroup(asyncio.Semaphore(10)) as tg:
+                for member in connected_ids:
+                    await tg.create_task(helpers.update_user_games(self.pool, member, self.tft_token, self.lol_token))
+            print("Finished updating server games.")
+
             for user_row in user_rows:
                 rows = await conn.fetch('''
                     SELECT win_loss
@@ -849,24 +860,63 @@ class BotCommands(commands.Cog):
                     else:
                         print("Missing snapshot(s)")
 
-                    if league_diff < 0:
-                        lp_diff_emoji = "📉"
-                    else:
-                        lp_diff_emoji = "📈"
-                    league_diff_str = f"+{league_diff}" if league_diff >= 0 else str(league_diff)
-                    text = (
-                        f"**{user_row['game_name']}#{user_row['tag_line']}**\n"
-                        f"{dicts.tier_to_rank_icon.get(old_rank, '')} **{dicts.rank_to_acronym[old_rank]}{dicts.rank_to_number[old_tier]} {old_lp} LP → "
-                        f"{dicts.tier_to_rank_icon.get(new_rank, '')} {dicts.rank_to_acronym[new_rank]}{dicts.rank_to_number[new_tier]} {new_lp} LP**\n"
-                        f"**{lp_diff_emoji} LP: {league_diff_str}**\n"
-                        f"🏆 **Record:** {wins} - {len(matches) - wins}\n"
-                    )
-                    final_str.append(text)
+                    entries.append({
+                        "name": f"{user_row['game_name']}#{user_row['tag_line']}",
+                        "old_rank": old_rank,
+                        "old_tier": old_tier,
+                        "old_lp": old_lp,
+                        "new_rank": new_rank,
+                        "new_tier": new_tier,
+                        "new_lp": new_lp,
+                        "league_diff": league_diff,
+                        "wins": wins,
+                        "losses": len(matches) - wins,
+                    })
 
-        description = "\n".join(final_str)
+
+        entries.sort(key=lambda e: e["league_diff"], reverse=True)
+        max_old_lp_width = max(len(str(e["old_lp"])) for e in entries)
+        max_new_lp_width = max(len(str(e["new_lp"])) for e in entries)
+        lp_width = max(max_old_lp_width, max_new_lp_width)
+        for e in entries:
+            old_lp_str = f"{e['old_lp']:>{lp_width}}"  # right-align old LP
+            new_lp_str = f"{e['new_lp']:>{lp_width}}"  # right-align new LP
+
+            e["rank_str"] = (
+                f"{dicts.rank_to_acronym[e['old_rank']]}{dicts.rank_to_number[e['old_tier']]} {old_lp_str} LP"
+                f" -> "
+                f"{dicts.rank_to_acronym[e['new_rank']]}{dicts.rank_to_number[e['new_tier']]} {new_lp_str} LP"
+            )
+
+        total_lp = sum(e["league_diff"] for e in entries)
+        name_w   = max(len(e["name"]) for e in entries)
+        rank_w   = max(len(e["rank_str"]) for e in entries)
+        lp_w = max(len(f"{e['league_diff']:+}") for e in entries)
+        record_w = max(len(f"{e['wins']}-{e['losses']}") for e in entries)
+        lines = []
+        lines.append(
+            f"{'Name':<{name_w}}  {'Rank Change':<{rank_w}}  {'LP Δ':>{lp_w}}  {'W-L':>{record_w}}"
+        )
+        lines.append("-" * (name_w + rank_w + lp_w + record_w + 6))
+
+        for e in entries:
+            lp_diff_str = f"{e['league_diff']:+}"
+            record_str = f"{e['wins']}-{e['losses']}"
+
+            line = (
+                f"{e['name']:<{name_w}}  "
+                f"{e['rank_str']:<{rank_w}}  "
+                f"{lp_diff_str:>{lp_w}}  "
+                f"{record_str:>{record_w}}"
+            )
+            lines.append(line)
+
+        title = f"**Total Server LP Change:** {'+' if total_lp >= 0 else '-'}{total_lp}"
+
+        description = "```text\n" + "\n".join(lines) + "\n```"
 
         embed = discord.Embed(
-            title="League Server Summary",
+            title=title,
             description=description,
             color=discord.Color.blue()
         )
@@ -1342,17 +1392,24 @@ class BotCommands(commands.Cog):
         commands_embed = discord.Embed(
         title=f"Commands List",
         description=f"""
-**!c** - Compare the profiles of two players\n
-**!commands** - Get a list of all commands\n
-**!cutoff** - Show the LP cutoffs for Challenger and GM\n
-**!h** - Display recent placements for a player\n
-**!lb** - View overall bot leaderboard\n
-**/link** - Link discord account to riot account\n
-**!ping** - Test that bot is active\n
-**!r** - View most recent match\n
-**!roll** - Rolls a random number (default 1-100)\n
-**!s** - Check ranked stats for a player\n
-**!t** - Gives summary of today's games
+**TFT Commands**:\n
+**!cutoff** - Show the LP cutoffs for Challenger and GM
+**!history | !h** - Display recent TFT placements for a player
+**!lb | !server** - View global/server bot TFT leaderboard
+**!recent | !r** - View the last TFT match played
+**!stats | !s** - Check ranked TFT stats for a player
+**!today | !t** - Gives summary of today's TFT games for a player (BUGGED)
+**\nLeague of Legends Commands**:\n
+**!leaguelb | !lserver** - View global/server bot League leaderboard
+**!leaguestats | !ls** - View a player's League stats
+**!leaguesummary | !lsum | lsumw** - View the server ranked solo/duo summary for the day/week (resets 6am EST)
+**!recentleague | !lr** - View the last League match played postfixes(n,d,a,f,c,ac,q)
+**!todayleague | !lt** - Gives summary of today's League games for a player
+**\nGeneral Commands:**\n
+**!roll** - Rolls a random number (default 1-100)
+**/link** - Link your Riot account to your Discord account
+**!ping** - Test that bot is active
+**!commands** - Get a list of all commands
         """,
         color=discord.Color.blue()
         )
