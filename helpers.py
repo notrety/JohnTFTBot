@@ -12,8 +12,8 @@ import os
 import hashlib
 
 CACHE_DIR = "image_cache"
-set_15_unix = 1764763200
-season_15_unix = 1736409600 + 10800
+set_16_unix = 1764763200
+season_16_unix = 1767873600
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -26,53 +26,6 @@ async def update_db_games(pool, tft_token, lol_token):
             await tg.create_task(update_user_games(pool, int(user['discord_id']), tft_token, lol_token))
 
     print("User games updated.")
-
-async def update_ranks(pool, tft_token, lol_token):
-    async with pool.acquire() as conn:
-
-        users = await conn.fetch('SELECT discord_id, tft_puuid, league_puuid, region FROM users;')
-
-        for user in users:
-            discord_id = user['discord_id']
-
-            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, user['region'])
-            current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, user['region'])
-
-            last_snapshot = await conn.fetchrow('''
-                SELECT league_lp, tft_lp
-                FROM lp
-                WHERE discord_id = $1
-                ORDER BY update_time DESC
-                LIMIT 1;
-            ''', discord_id)
-
-            lp_changed = (
-                last_snapshot is None or
-                str(last_snapshot['league_lp']) != str(current_lol_lp) or
-                str(last_snapshot['tft_lp']) != str(current_tft_lp)
-            )
-
-            if lp_changed:
-                unix_timestamp = int(time.time())
-                await conn.execute('''
-                    INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
-                    VALUES ($1, $2, $3, $4);
-                ''', discord_id, unix_timestamp, current_lol_lp, current_tft_lp)
-
-                print(f"LP updated for {discord_id}: TFT={current_tft_lp}, LoL={current_lol_lp}")
-            else:
-                if last_snapshot:
-                    new_timestamp = int(time.time())
-                    await conn.execute('''
-                        UPDATE lp
-                        SET update_time = $1
-                        WHERE discord_id = $2
-                        AND update_time = $3;
-                    ''', new_timestamp, discord_id, last_snapshot['update_time'])
-
-                print(f"No LP change for {discord_id}")
-
-    print("Ranks updated")
 
 async def update_user_games(pool, user_id, tft_token, lol_token):
     try:
@@ -91,64 +44,79 @@ async def update_user_games(pool, user_id, tft_token, lol_token):
             region = user['region']
             mass_region = user['mass_region']
 
-            # Fetch current LPs
-            current_tft_lp, _, _, _ = await calculate_elo(user['tft_puuid'], "TFT", tft_token, region)
-            current_lol_lp, _, _, _ = await calculate_elo(user['league_puuid'], "League", lol_token, region)
-
-            # Get most recent snapshot
-            last_snapshot = await conn.fetchrow('''
-                SELECT update_time, league_lp, tft_lp
+            # TFT
+            last_tft_match = await conn.fetchrow('''
+                SELECT match_id, elo, update_time
                 FROM lp
-                WHERE discord_id = $1
+                WHERE puuid = $1 AND game = 'TFT'
                 ORDER BY update_time DESC
-                LIMIT 1;
-            ''', user_id)
+                LIMIT 1
+            ''', user['tft_puuid'])
 
-            lp_changed = (
-                last_snapshot is None or
-                last_snapshot['tft_lp'] != current_tft_lp or
-                last_snapshot['league_lp'] != current_lol_lp
-            )
+            # fetch new matches since last seen
+            last_tft_time = last_tft_match['update_time'] if last_tft_match else set_16_unix
+            err, tft_match_list = await find_all_match_ids(user['tft_puuid'], "TFT", mass_region, tft_token, last_tft_time)
 
-            if lp_changed:
-                print(f"[INFO] Rank change detected for {user['game_name']}")
+            if tft_match_list:
+            
+                # add matches one by one to LP table
+                await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list)
+                tft_elo = await calculate_elo(user['tft_puuid'], "TFT", tft_token, region)
 
-                timestamp = int(time.time())
-
-                # TFT updates
-                if last_snapshot and last_snapshot['tft_lp'] != current_tft_lp:
-                    err, tft_match_list = await find_all_match_ids(
-                        user['tft_puuid'], "TFT", mass_region, tft_token, last_snapshot['update_time']
-                    )
-                    if tft_match_list:
-                        await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list)
-
-                # League updates
-                if last_snapshot and last_snapshot['league_lp'] != current_lol_lp:
-                    err, lol_match_list = await find_all_match_ids(
-                        user['league_puuid'], "League", mass_region, lol_token, last_snapshot['update_time']
-                    )
-                    if lol_match_list:
-                        await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
-
-                # Insert new LP snapshot
-                await conn.execute('''
-                    INSERT INTO lp (discord_id, update_time, league_lp, tft_lp)
-                    VALUES ($1, $2, $3, $4);
-                ''', user_id, timestamp, current_lol_lp, current_tft_lp)
+                last_match_id = tft_match_list[0]
+                await conn.execute("""
+                    INSERT INTO lp (match_id, puuid, game, update_time, elo)
+                    VALUES ($1,$2,'TFT',$3,$4)
+                    ON CONFLICT (puuid)
+                    DO UPDATE SET
+                        match_id = EXCLUDED.match_id,
+                        game = EXCLUDED.game,
+                        update_time = EXCLUDED.update_time,
+                        elo = EXCLUDED.elo;
+                    WHERE EXCLUDED.match_id > lp.match_id;
+                """,
+                
+                last_match_id,user['tft_puuid'],int(time.time()),tft_elo)
 
             else:
-                # No LP change — just refresh snapshot timestamp
-                if last_snapshot:
-                    new_timestamp = int(time.time())
-                    await conn.execute('''
-                        UPDATE lp
-                        SET update_time = $1
-                        WHERE discord_id = $2
-                        AND update_time = $3;
-                    ''', new_timestamp, user_id, last_snapshot['update_time'])
+                last_tft_match = {'update_time': int(time.time())}
 
-                print(f"[INFO] No LP change for {user['game_name']}")
+            # --- League ---
+            last_lol_match = await conn.fetchrow('''
+                SELECT match_id, elo, update_time
+                FROM lp
+                WHERE puuid = $1 AND game = 'League'
+                ORDER BY update_time DESC
+                LIMIT 1
+            ''', user['league_puuid'])
+
+            last_lol_time = last_lol_match['update_time'] if last_lol_match else season_16_unix
+            err, lol_match_list = await find_all_match_ids(
+                user['league_puuid'], "League", mass_region, lol_token, last_lol_time
+            )
+
+            if lol_match_list:
+                await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
+                last_lol_match_id = lol_match_list[0]
+
+                lol_elo = await calculate_elo(user['league_puuid'], "League", lol_token, region)
+
+                await conn.execute("""
+                    INSERT INTO lp (match_id, puuid, game, update_time, elo)
+                    VALUES ($1, $2, 'League', $3, $4)
+                    ON CONFLICT (puuid)
+                    DO UPDATE SET
+                        match_id = EXCLUDED.match_id,
+                        game = EXCLUDED.game,
+                        update_time = EXCLUDED.update_time,
+                        elo = EXCLUDED.elo;
+                    WHERE EXCLUDED.match_id > lp.match_id;
+                """, last_lol_match_id, user['league_puuid'], int(time.time()), lol_elo)
+
+            else:
+                last_lol_match = {'update_time': int(time.time())}
+
+            print(f"[INFO] Updated matches for {user['game_name']}")
 
     except Exception as e:
         print(f"[ERROR] update_user_games failed for {user_id}: {e}")
@@ -177,6 +145,9 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
 
                     game_datetime = match_info['info']['game_datetime']
                     participants = match_info['info']['participants']
+                    if game_datetime < set_16_unix * 1000:
+                        print(f"{game} match id {match_id} before set 16, skipping")
+                        continue
 
                     p = next((p for p in participants if p['puuid'] == puuid), None)
                     if p:
@@ -201,6 +172,11 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
                         continue
 
                     game_datetime = match_info['info']['gameEndTimestamp']
+
+                    if game_datetime < season_16_unix * 1000:
+                        print(f"{game} match id {match_id} before season 16, skipping")
+                        continue
+
                     participants = match_info['info']['participants']
                     for p in participants:
                         if p['puuid'] == puuid:
@@ -215,42 +191,78 @@ async def add_new_match(conn, puuid, game, mass_region, token, match_list):
         print(f"[ERROR] Failed to insert match {match_id}, placement {p['placement']}: {e}")
 
 async def find_missing_games(pool, tft_token, lol_token):
-    
     async with pool.acquire() as conn:
 
-        rows = await conn.fetch('''
-        WITH last_lp AS (
-            SELECT DISTINCT ON (discord_id)
-                discord_id,
-                update_time,
-                tft_lp,
-                league_lp
+        rows = await conn.fetch("""
+        WITH last_match AS (
+            SELECT DISTINCT ON (puuid)
+                puuid,
+                game,
+                update_time
             FROM lp
-            ORDER BY discord_id, update_time DESC
+            ORDER BY puuid, game, update_time DESC
         )
         SELECT
             u.discord_id,
             u.game_name,
+            u.tag_line,
             u.tft_puuid,
             u.league_puuid,
+            u.region,
             u.mass_region,
-            lp.update_time AS last_update_time
+            tft.update_time AS last_tft_time,
+            lol.update_time AS last_lol_time
         FROM users u
-        LEFT JOIN last_lp lp ON u.discord_id = lp.discord_id;
-        ''')
+        LEFT JOIN last_match tft
+            ON tft.puuid = u.tft_puuid AND tft.game = 'TFT'
+        LEFT JOIN last_match lol
+            ON lol.puuid = u.league_puuid AND lol.game = 'League';
+        """)
 
         for row in rows:
-            timestamp = row['last_update_time']
+            err, tft_match_ids = await find_all_match_ids(row['tft_puuid'], "TFT", row['mass_region'], tft_token, timestamp=set_16_unix)
 
-            err, tft_match_list = await find_all_match_ids(row['tft_puuid'], "TFT", row["mass_region"], tft_token, timestamp=timestamp)
+            if tft_match_ids:
+                tft_elo, _, _, _ = await calculate_elo(row['tft_puuid'], "TFT", tft_token, row['region'])
+                await add_new_match(conn, row['tft_puuid'], 'TFT', row['mass_region'], tft_token, tft_match_ids)
 
-            err, lol_match_list = await find_all_match_ids(row['league_puuid'], "League", row["mass_region"], lol_token, timestamp=timestamp)
+                last_match_id = tft_match_ids[0]
+                await conn.execute("""
+                    INSERT INTO lp (match_id, puuid, game, update_time, elo)
+                    VALUES ($1,$2,'TFT',$3,$4)
+                    ON CONFLICT (puuid)
+                    DO UPDATE SET
+                        match_id = EXCLUDED.match_id,
+                        game = EXCLUDED.game,
+                        update_time = EXCLUDED.update_time,
+                        elo = EXCLUDED.elo;
+                    WHERE EXCLUDED.match_id > lp.match_id;
+                """,
+                last_match_id,row['tft_puuid'],int(time.time()),tft_elo)
 
-            if tft_match_list:
-                await add_new_match(conn, row['tft_puuid'], "TFT", row["mass_region"], tft_token, tft_match_list)
+            # ---------- League ----------
+            err, lol_match_ids = await find_all_match_ids(row['league_puuid'], "League", row['mass_region'], lol_token, timestamp=season_16_unix)
 
-            if lol_match_list:
-                await add_new_match(conn, row['league_puuid'], "League", row["mass_region"], lol_token, lol_match_list)
+            if lol_match_ids:
+
+                last_lol_match_id = lol_match_ids[0]
+
+                lol_elo, _, _, _ = await calculate_elo(row['league_puuid'], "League", lol_token, row['region'])
+                await add_new_match(conn, row['league_puuid'], 'League', row['mass_region'], lol_token, lol_match_ids)
+                await conn.execute("""
+                    INSERT INTO lp (match_id, puuid, game, update_time, elo)
+                    VALUES ($1, $2, 'League', $3, $4)
+                    ON CONFLICT (puuid)
+                    DO UPDATE SET
+                        match_id = EXCLUDED.match_id,
+                        game = EXCLUDED.game,
+                        update_time = EXCLUDED.update_time,
+                        elo = EXCLUDED.elo;
+                    WHERE EXCLUDED.match_id > lp.match_id;
+                """, last_lol_match_id, row['league_puuid'], int(time.time()), lol_elo)
+
+            print(f"[INFO] Processed {row['game_name']} ({row['discord_id']})")
+    print("All missing matches found!")
 
 async def get_rank_info(region, puuid, tft_token):
     async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
@@ -447,7 +459,6 @@ async def get_puuid(gameName, tagLine, mass_region, riot_token):
 
 # Function to calculate ranked elo based on given PUUID
 async def calculate_elo(puuid, game, token, region):
-    attempts = 0
     while True:
         try:
             # Fetch summoner data
@@ -602,19 +613,18 @@ async def find_all_match_ids(puuid, game, mass_region, token, timestamp):
                         matches = await client.get_lol_match_v5_match_ids_by_puuid(
                             region=mass_region,
                             puuid=puuid,
-                            queries={"start": counter, "startTime": timestamp, "count": 100}
+                            queries={"queue": 420, "type": "ranked", "start": counter, "startTime": timestamp, "count": 100}
                         )
                     else:
                         matches = await client.get_lol_match_v5_match_ids_by_puuid(
                             region=mass_region,
                             puuid=puuid,
-                            queries={"start": counter, "count": 100}
+                            queries={"queue": 420, "type": "ranked", "start": counter, "count": 100}
                         )
 
                 else:
                     return f"Invalid game type: {game}", None, puuid
 
-                # If no matches returned, stop
                 if not matches:
                     break
 
@@ -630,7 +640,7 @@ async def find_all_match_ids(puuid, game, mass_region, token, timestamp):
         return f"Error fetching matches for {puuid}: {err}", None
 
 
-async def find_match_ids(gameName, tagLine, mode, game, mass_region, token):
+async def find_match_ids(gameName, tagLine, mode, game, mass_region, token, num_matches=20):
     puuid = await get_puuid(gameName, tagLine, mass_region, token)
     if not puuid:
         return f"Could not find PUUID for {gameName}#{tagLine}.", None
@@ -640,7 +650,7 @@ async def find_match_ids(gameName, tagLine, mode, game, mass_region, token):
             if game == "TFT":
                 match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
             elif game == "League":
-                match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid, queries={"start": 0, "count": 20})
+                match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid, queries={"start": 0, "count": num_matches})
 
             if not match_list:
                 return f"No matches found for {gameName}#{tagLine}.", None, puuid
