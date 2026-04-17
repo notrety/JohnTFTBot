@@ -1409,19 +1409,18 @@ class BotCommands(commands.Cog):
 
             os.remove("placements.png")
 
-    # Command that summarizes todays games, only works for linked accounts
     @commands.command(name="today", aliases=["t"])
     async def today(self, ctx, *args): 
-        # Account must be linked for this command
         gameNum, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
 
         if user_id:
             user_id = int(user_id)
             data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
-            return f"Must be a linked user to use this command.", None, None
+            return await ctx.send("Must be a linked user to use this command.")
             
         await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
         today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
@@ -1432,97 +1431,101 @@ class BotCommands(commands.Cog):
 
         async with self.pool.acquire() as conn:
             print("Running fetch with:", user_id, cutoff, type(cutoff))
+
             user_row = await conn.fetchrow('''
-                    SELECT league_puuid, tft_puuid, region
-                    FROM users
-                    WHERE discord_id = $1;
-                ''', user_id)
+                SELECT league_puuid, tft_puuid, region
+                FROM users
+                WHERE discord_id = $1;
+            ''', user_id)
             
             if not user_row:
-                    print(f"No user found with discord_id {user_id}")
-                    await ctx.send("❌ Could not find a linked TFT account for this user.")
-                    return
+                print(f"No user found with discord_id {user_id}")
+                await ctx.send("❌ Could not find a linked TFT account for this user.")
+                return
             
+            # 🔹 Fetch today's games
             rows = await conn.fetch('''
-                SELECT *
+                SELECT placement, elo, game_datetime
                 FROM tft_games
                 WHERE tft_puuid = $1
                 AND game_datetime >= $2
                 ORDER BY game_datetime DESC;
-            ''', user_row['tft_puuid'], cutoff*1000)
+            ''', user_row['tft_puuid'], cutoff * 1000)
 
             print("Fetched rows:", len(rows))
 
             placements = [row['placement'] for row in rows]
 
-            first_snapshot = await conn.fetchrow('''
-                SELECT tft_lp
-                FROM lp
-                WHERE discord_id = $1
-                AND update_time >= $2
-                ORDER BY update_time ASC
-                LIMIT 1;
-            ''', user_id, cutoff)
-
-            # If no LP snapshot after cutoff, get the *latest* one before it
-            if not first_snapshot:
+            # 🔹 Snapshot logic using tft_games only
+            if rows:
+                latest_snapshot = rows[0]      # most recent game today
+                first_snapshot = rows[-1]      # oldest game today
+            else:
+                # fallback: get most recent game before cutoff
                 first_snapshot = await conn.fetchrow('''
-                    SELECT league_lp
-                    FROM lp
-                    WHERE discord_id = $1
-                    AND update_time < $2
-                    ORDER BY update_time DESC
+                    SELECT elo, game_datetime
+                    FROM tft_games
+                    WHERE tft_puuid = $1
+                    AND game_datetime < $2
+                    ORDER BY game_datetime DESC
                     LIMIT 1;
-                ''', user_id, cutoff)
+                ''', user_row['tft_puuid'], cutoff * 1000)
 
-            latest_snapshot = await conn.fetchrow('''
-                SELECT tft_lp
-                FROM lp
-                WHERE discord_id = $1
-                ORDER BY update_time DESC
-                LIMIT 1;
-            ''', user_id)
+                latest_snapshot = first_snapshot
+
+            print("first_snapshot:", first_snapshot)
+            print("latest_snapshot:", latest_snapshot)
 
             tft_diff = 0  
+
             if first_snapshot and latest_snapshot:
-                tft_diff = latest_snapshot['tft_lp'] - first_snapshot['tft_lp']
-                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['tft_lp'])
-                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['tft_lp'])
+                tft_diff = latest_snapshot['elo'] - first_snapshot['elo']
+
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
             else:
                 print("Missing snapshot(s)")
+                old_rank = old_tier = old_lp = "N/A"
+                new_rank = new_tier = new_lp = "N/A"
 
-        if tft_diff < 0:
+        # 🔹 Formatting
+        if isinstance(tft_diff, int) and tft_diff < 0:
             lp_diff_emoji = "📉"
+            tft_diff_str = str(tft_diff)
         else:
-            tft_diff = "+" + str(tft_diff)
             lp_diff_emoji = "📈"
+            tft_diff_str = f"+{tft_diff}" if isinstance(tft_diff, int) else "N/A"
+
         url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
 
         total_placement = sum(placements)
-        scores = " ".join(dicts.number_to_num_icon[placement] for placement in placements)
-        if len(placements) > 0:
-            avg_placement = round(total_placement / len(placements), 1)
-        else:
-            avg_placement = "N/A"
+        scores = " ".join(dicts.number_to_num_icon[p] for p in placements)
+
+        avg_placement = round(total_placement / len(placements), 1) if placements else "N/A"
+
         text = (
-            f"{dicts.tier_to_rank_icon[old_rank]} {old_rank} {old_tier} {old_lp} LP -> {dicts.tier_to_rank_icon[new_rank]} {new_rank} {new_tier} {new_lp} LP\n"
-            f"{lp_diff_emoji} **LP Difference:** {tft_diff}\n"
+            f"{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP -> "
+            f"{dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP\n"
+            f"{lp_diff_emoji} **LP Difference:** {tft_diff_str}\n"
             f"📊 **Games Played:** {len(placements)}\n"
             f"⭐ **AVP:** {avg_placement}\n"
-            f"🏅 **Scores: **{scores}"
+            f"🏅 **Scores:** {scores}"
         )
 
         embed = discord.Embed(
             description=text,
             color=discord.Color.blue()
         )
+
         embed.set_author(
             name=f"Today: {gameName}#{tagLine}",
-            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set16",
+            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(' ', '%20')}-{tagLine}/set16",
             icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
         )
+
         embed.set_thumbnail(url=url)
         embed.set_footer(text="Last five matches below")
+
         await ctx.send(embed=embed)
 
     # Command to check all available commands, update as new commands are added (list alphabetically)
