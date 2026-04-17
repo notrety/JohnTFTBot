@@ -635,128 +635,130 @@ class BotCommands(commands.Cog):
     @commands.command(name="todayleague", aliases=["tl","lt"])
     async def today_league(self, ctx, *args):
         mappings = {
-            "lol_item_mapping": self.lol_item_mapping,     # item ID → icon path
-            "keystone_mapping": self.keystone_mapping,     # keystone ID → icon path
-            "runes_mapping": self.runes_mapping,           # rune ID → icon path
-            "summs_mapping": self.summs_mapping            # summoner spell ID → icon path
+            "lol_item_mapping": self.lol_item_mapping,
+            "keystone_mapping": self.keystone_mapping,
+            "runes_mapping": self.runes_mapping,
+            "summs_mapping": self.summs_mapping
         }
+
         game_type = "Ranked Solo/Duo"
+
         game_num, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
         if not game_num:
             game_num = 0
+
         if user_id:
             user_id = int(user_id)
-            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "League")
+            data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(
+                user_id, self.pool, "League"
+            )
         else:
-            return f"Must be a linked user to use this command.", None, None
+            return await ctx.send("Must be a linked user to use this command.")
 
-        background_color = (0,0,0,0)
-        
         await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
         today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+
         if now < today_6am:
             today_6am -= timedelta(days=1)
 
         cutoff = int(today_6am.timestamp())
 
         async with self.pool.acquire() as conn:
+
             user_row = await conn.fetchrow('''
-                    SELECT league_puuid, region
-                    FROM users
-                    WHERE discord_id = $1;
-                ''', user_id)
-            
+                SELECT league_puuid, region
+                FROM users
+                WHERE discord_id = $1;
+            ''', user_id)
+
             if not user_row:
-                    print(f"No user found with discord_id {user_id}")
-                    await ctx.send("❌ Could not find a linked TFT account for this user.")
-                    return
-            
+                await ctx.send("❌ Could not find a linked account.")
+                return
+
+            # 🔹 Fetch today's league games
             rows = await conn.fetch('''
                 SELECT *
                 FROM league_games
                 WHERE league_puuid = $1
                 AND game_datetime >= $2
                 ORDER BY game_datetime DESC;
-            ''', user_row['league_puuid'], cutoff*1000)
+            ''', user_row['league_puuid'], cutoff * 1000)
 
             matches = [row['match_id'] for row in rows]
-            matches_outcomes = [row['win_loss'] for row in rows]
-            wins = sum(matches_outcomes)
+            wins = sum(row['win_loss'] for row in rows)
 
-            first_snapshot = await conn.fetchrow('''
-                SELECT league_lp
-                FROM lp
-                WHERE discord_id = $1
-                AND update_time >= $2
-                ORDER BY update_time ASC
-                LIMIT 1;
-            ''', user_id, cutoff)
-
-            # If no LP snapshot after cutoff, get the *latest* one before it
-            if not first_snapshot:
-                first_snapshot = await conn.fetchrow('''
-                    SELECT league_lp
-                    FROM lp
-                    WHERE discord_id = $1
-                    AND update_time < $2
-                    ORDER BY update_time DESC
-                    LIMIT 1;
-                ''', user_id, cutoff)
-
-            latest_snapshot = await conn.fetchrow('''
-                SELECT league_lp
-                FROM lp
-                WHERE discord_id = $1
-                ORDER BY update_time DESC
-                LIMIT 1;
-            ''', user_id)
-
-            league_diff = 0  
-            if first_snapshot and latest_snapshot:
-                league_diff = latest_snapshot['league_lp'] - first_snapshot['league_lp']
-                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['league_lp'])
-                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['league_lp'])
+            # 🔹 Snapshot logic using league_games ONLY
+            if rows:
+                latest_snapshot = rows[0]
+                first_snapshot = rows[-1]
             else:
-                print("Missing snapshot(s)")
+                first_snapshot = await conn.fetchrow('''
+                    SELECT elo, game_datetime
+                    FROM league_games
+                    WHERE league_puuid = $1
+                    AND game_datetime < $2
+                    ORDER BY game_datetime DESC
+                    LIMIT 1;
+                ''', user_row['league_puuid'], cutoff * 1000)
 
+                latest_snapshot = first_snapshot
+
+            if not first_snapshot or not latest_snapshot:
+                await ctx.send("No snapshot data found.")
+                return
+
+            league_diff = latest_snapshot['elo'] - first_snapshot['elo']
+
+            old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
+            new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+
+        # 🔹 formatting
         if league_diff < 0:
             lp_diff_emoji = "📉"
+            diff_str = str(league_diff)
         else:
-            league_diff = "+" + str(league_diff)
             lp_diff_emoji = "📈"
+            diff_str = f"+{league_diff}"
 
         url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
+
         text = (
             f"{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP "
             f"→ {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP\n"
-            f"{lp_diff_emoji} **LP Difference:** {league_diff}\n"
-            f"🏆**Record:** {wins} - {len(matches) - wins}"
+            f"{lp_diff_emoji} **LP Difference:** {diff_str}\n"
+            f"🏆 **Record:** {wins} - {len(matches) - wins}"
         )
 
         embed = discord.Embed(
             description=text,
             color=discord.Color.blue()
         )
+
         embed.set_author(
             name=f"Today: {gameName}#{tagLine}",
             url=f"https://op.gg/lol/summoners/{region[:-1]}/{gameName.replace(' ', '%20')}-{tagLine}",
-            icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250?cb=20191029062637"
+            icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250"
         )
+
         embed.set_thumbnail(url=url)
         embed.set_footer(text="Last five matches below")
+
         await ctx.send(embed=embed)
 
+        # 🔹 Match detail rendering
         results = []
+
         async with TaskGroup(asyncio.Semaphore(20)) as tg:
             tasks = []
-            for match_id in matches[:5]:
 
+            for match_id in matches[:5]:
                 task = await tg.create_task(
                     helpers.league_last_match(
                         gameName, tagLine, mass_region, self.lol_token,
-                        puuid, match_id, game_type, mappings, background_color, False
+                        puuid, match_id, game_type, mappings, (0, 0, 0, 0), False
                     )
                 )
                 tasks.append(task)
@@ -766,8 +768,10 @@ class BotCommands(commands.Cog):
 
         embeds = []
         files = []
+
         for res in results:
             error, final_file, tab_embed, *_ = res
+
             if error:
                 await ctx.send(error)
                 continue
@@ -776,13 +780,10 @@ class BotCommands(commands.Cog):
             if final_file:
                 files.append(final_file)
 
-        # Send all at once
         if embeds or files:
             await ctx.send(files=files, embeds=embeds)
         else:
-            await ctx.send("No valid matches to display.")
-
-    @commands.command(name="summary", aliases=["sum","sumw"])
+            await ctx.send("No valid matches to display.")    @commands.command(name="summary", aliases=["sum","sumw"])
     async def summary(self, ctx, *args):
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
@@ -791,95 +792,102 @@ class BotCommands(commands.Cog):
             today_6am -= timedelta(days=1)
         if ctx.invoked_with == "sumw":
             today_6am -= timedelta(days=7)
+
         cutoff = int(today_6am.timestamp())
 
         guild = ctx.guild
         members = [member.id async for member in guild.fetch_members(limit=None)]
         
-        entries = [];
+        entries = []
+
         async with self.pool.acquire() as conn:
 
             user_rows = await conn.fetch('''
-                    SELECT *
-                    FROM users
-                    WHERE discord_id = ANY($1)
-                ''', members)
+                SELECT *
+                FROM users
+                WHERE discord_id = ANY($1)
+            ''', members)
             
             connected_ids = [row["discord_id"] for row in user_rows]
 
             async with TaskGroup(asyncio.Semaphore(10)) as tg:
                 for member in connected_ids:
-                    await tg.create_task(helpers.update_user_games(self.pool, member, self.tft_token, self.lol_token))
+                    await tg.create_task(
+                        helpers.update_user_games(
+                            self.pool, member, self.tft_token, self.lol_token
+                        )
+                    )
+
             print("Finished updating server games.")
 
             for user_row in user_rows:
                 rows = await conn.fetch('''
-                    SELECT placement
+                    SELECT placement, elo, game_datetime
                     FROM tft_games
                     WHERE tft_puuid = $1
                     AND game_datetime >= $2
                     ORDER BY game_datetime DESC;
-                ''', user_row['tft_puuid'], cutoff*1000)
+                ''', user_row['tft_puuid'], cutoff * 1000)
 
                 placements = [row['placement'] for row in rows]
-                if placements:
-                    user_id = user_row['discord_id']
+
+                # 🔹 Snapshot logic using tft_games
+                if rows:
+                    latest_snapshot = rows[0]      # newest game
+                    first_snapshot = rows[-1]      # oldest game in timeframe
+                else:
+                    # fallback: last game before cutoff
                     first_snapshot = await conn.fetchrow('''
-                        SELECT tft_lp
-                        FROM lp
-                        WHERE discord_id = $1
-                        AND update_time >= $2
-                        ORDER BY update_time ASC
+                        SELECT elo, game_datetime
+                        FROM tft_games
+                        WHERE tft_puuid = $1
+                        AND game_datetime < $2
+                        ORDER BY game_datetime DESC
                         LIMIT 1;
-                    ''', user_id, cutoff)
+                    ''', user_row['tft_puuid'], cutoff * 1000)
 
-                    if not first_snapshot:
-                        first_snapshot = await conn.fetchrow('''
-                            SELECT tft_lp
-                            FROM lp
-                            WHERE discord_id = $1
-                            AND update_time < $2
-                            ORDER BY update_time DESC
-                            LIMIT 1;
-                        ''', user_id, cutoff)
+                    latest_snapshot = first_snapshot
 
-                    latest_snapshot = await conn.fetchrow('''
-                        SELECT tft_lp
-                        FROM lp
-                        WHERE discord_id = $1
-                        ORDER BY update_time DESC
-                        LIMIT 1;
-                    ''', user_id)
+                if not first_snapshot or not latest_snapshot:
+                    print(f"Missing snapshot for {user_row['game_name']}")
+                    continue
 
-                    tft_diff = 0  
-                    if first_snapshot and latest_snapshot:
-                        tft_diff = latest_snapshot['tft_lp'] - first_snapshot['tft_lp']
-                        old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['tft_lp'])
-                        new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['tft_lp'])
-                    else:
-                        print("Missing snapshot(s)")
+                # 🔹 Compute LP diff
+                tft_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-                    entries.append({
-                        "name": f"{user_row['game_name']}#{user_row['tag_line']}",
-                        "old_rank": old_rank,
-                        "old_tier": old_tier,
-                        "old_lp": old_lp,
-                        "new_rank": new_rank,
-                        "new_tier": new_tier,
-                        "new_lp": new_lp,
-                        "tft_diff": tft_diff,
-                        "matches": len(placements),
-                        "avp": round(sum(placements) / len(placements), 1)
-                    })
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+
+                entries.append({
+                    "name": f"{user_row['game_name']}#{user_row['tag_line']}",
+                    "old_rank": old_rank,
+                    "old_tier": old_tier,
+                    "old_lp": old_lp,
+                    "new_rank": new_rank,
+                    "new_tier": new_tier,
+                    "new_lp": new_lp,
+                    "tft_diff": tft_diff,
+                    "matches": len(placements),
+                    "avp": round(sum(placements) / len(placements), 1) if placements else 0
+                })
 
         print("entries collected")
+
+        if not entries:
+            await ctx.send("No TFT games found for this period.")
+            return
+
+        # 🔹 Sort by LP gain
         entries.sort(key=lambda e: e["tft_diff"], reverse=True)
+
+        # 🔹 Align LP formatting
         max_old_lp_width = max(len(str(e["old_lp"])) for e in entries)
         max_new_lp_width = max(len(str(e["new_lp"])) for e in entries)
         lp_width = max(max_old_lp_width, max_new_lp_width)
+
         for e in entries:
-            old_lp_str = f"{e['old_lp']:>{lp_width}}"  # right-align old LP
-            new_lp_str = f"{e['new_lp']:>{lp_width}}"  # right-align new LP
+            old_lp_str = f"{e['old_lp']:>{lp_width}}"
+            new_lp_str = f"{e['new_lp']:>{lp_width}}"
 
             e["rank_str"] = (
                 f"{dicts.rank_to_acronym[e['old_rank']]}{dicts.rank_to_number[e['old_tier']]} {old_lp_str} LP"
@@ -888,20 +896,25 @@ class BotCommands(commands.Cog):
             )
 
         print("rank strings prepared")
+
         total_lp = sum(e["tft_diff"] for e in entries)
+
         name_w   = max(len(e["name"]) for e in entries)
         rank_w   = max(len(e["rank_str"]) for e in entries)
-        lp_w = max(len(f"{e['tft_diff']:+}") for e in entries)
-        matches_w = max(len(f"{e['matches']}") for e in entries)
+        lp_w     = max(len(f"{e['tft_diff']:+}") for e in entries)
+        matches_w = max(len(str(e["matches"])) for e in entries)
+
         lines = []
         lines.append(
-            f"{'Name':<{name_w}}  {'Rank Change':<{rank_w}}  {'LP Δ':>{lp_w}}  {'AVP':>{matches_w}}"
+            f"{'Name':<{name_w}}  {'Rank Change':<{rank_w}}  {'LP Δ':>{lp_w}}  {'Games':>{matches_w}}"
         )
         lines.append("-" * (name_w + rank_w + lp_w + matches_w + 6))
+
         print("header prepared")
+
         for e in entries:
             lp_diff_str = f"{e['tft_diff']:+}"
-            matches_str = f"{e['matches']}"
+            matches_str = str(e["matches"])
 
             line = (
                 f"{e['name']:<{name_w}}  "
@@ -914,112 +927,126 @@ class BotCommands(commands.Cog):
         title = f"**Total Server LP Change:** {'+' if total_lp >= 0 else ''}{total_lp}"
 
         description = "```text\n" + "\n".join(lines) + "\n```"
+
         print("lines prepared")
+
         embed = discord.Embed(
             title=title,
             description=description,
             color=discord.Color.blue()
         )
-        await ctx.send(embed=embed)
 
+        await ctx.send(embed=embed)
+        
     @commands.command(name="leaguesummary", aliases=["lsum","lsumw"])
     async def league_summary(self, ctx, *args):
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
         today_6am = now.replace(hour=6, minute=0, second=0, microsecond=0)
+
         if now < today_6am:
             today_6am -= timedelta(days=1)
         if ctx.invoked_with == "lsumw":
             today_6am -= timedelta(days=7)
+
         cutoff = int(today_6am.timestamp())
 
         guild = ctx.guild
         members = [member.id async for member in guild.fetch_members(limit=None)]
-        
-        entries = [];
+
+        entries = []
+
         async with self.pool.acquire() as conn:
 
             user_rows = await conn.fetch('''
-                    SELECT *
-                    FROM users
-                    WHERE discord_id = ANY($1)
-                ''', members)
-            
+                SELECT *
+                FROM users
+                WHERE discord_id = ANY($1)
+            ''', members)
+
             connected_ids = [row["discord_id"] for row in user_rows]
 
             async with TaskGroup(asyncio.Semaphore(10)) as tg:
                 for member in connected_ids:
-                    await tg.create_task(helpers.update_user_games(self.pool, member, self.tft_token, self.lol_token))
+                    await tg.create_task(
+                        helpers.update_user_games(
+                            self.pool, member, self.tft_token, self.lol_token
+                        )
+                    )
+
             print("Finished updating server games.")
 
             for user_row in user_rows:
+
+                # 🔹 Fetch league games in range
                 rows = await conn.fetch('''
-                    SELECT win_loss
+                    SELECT win_loss, elo, game_datetime
                     FROM league_games
                     WHERE league_puuid = $1
                     AND game_datetime >= $2
                     ORDER BY game_datetime DESC;
-                ''', user_row['league_puuid'], cutoff*1000)
+                ''', user_row['league_puuid'], cutoff * 1000)
 
                 matches = [row['win_loss'] for row in rows]
-                if matches:
-                    wins = sum(matches)
-                    user_id = user_row['discord_id']
+
+                if not rows:
+                    continue
+
+                wins = sum(matches)
+
+                # 🔹 Snapshot logic from league_games
+                if rows:
+                    latest_snapshot = rows[0]
+                    first_snapshot = rows[-1]
+                else:
                     first_snapshot = await conn.fetchrow('''
-                        SELECT league_lp
-                        FROM lp
-                        WHERE discord_id = $1
-                        AND update_time >= $2
-                        ORDER BY update_time ASC
+                        SELECT elo, game_datetime
+                        FROM league_games
+                        WHERE league_puuid = $1
+                        AND game_datetime < $2
+                        ORDER BY game_datetime DESC
                         LIMIT 1;
-                    ''', user_id, cutoff)
+                    ''', user_row['league_puuid'], cutoff * 1000)
 
-                    if not first_snapshot:
-                        first_snapshot = await conn.fetchrow('''
-                            SELECT league_lp
-                            FROM lp
-                            WHERE discord_id = $1
-                            AND update_time < $2
-                            ORDER BY update_time DESC
-                            LIMIT 1;
-                        ''', user_id, cutoff)
+                    latest_snapshot = first_snapshot
 
-                    latest_snapshot = await conn.fetchrow('''
-                        SELECT league_lp
-                        FROM lp
-                        WHERE discord_id = $1
-                        ORDER BY update_time DESC
-                        LIMIT 1;
-                    ''', user_id)
+                if not first_snapshot or not latest_snapshot:
+                    continue
 
-                    league_diff = 0  
-                    if first_snapshot and latest_snapshot:
-                        league_diff = latest_snapshot['league_lp'] - first_snapshot['league_lp']
-                        old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['league_lp'])
-                        new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['league_lp'])
-                    else:
-                        print("Missing snapshot(s)")
+                # 🔹 LP diff
+                league_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-                    entries.append({
-                        "name": f"{user_row['game_name']}#{user_row['tag_line']}",
-                        "old_rank": old_rank,
-                        "old_tier": old_tier,
-                        "old_lp": old_lp,
-                        "new_rank": new_rank,
-                        "new_tier": new_tier,
-                        "new_lp": new_lp,
-                        "league_diff": league_diff,
-                        "wins": wins,
-                        "losses": len(matches) - wins,
-                    })
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
 
+                entries.append({
+                    "name": f"{user_row['game_name']}#{user_row['tag_line']}",
+                    "old_rank": old_rank,
+                    "old_tier": old_tier,
+                    "old_lp": old_lp,
+                    "new_rank": new_rank,
+                    "new_tier": new_tier,
+                    "new_lp": new_lp,
+                    "league_diff": league_diff,
+                    "wins": wins,
+                    "losses": len(matches) - wins,
+                })
+
+        # 🔹 Sort
         entries.sort(key=lambda e: e["league_diff"], reverse=True)
+
+        if not entries:
+            await ctx.send("No League games found for this period.")
+            return
+
+        # 🔹 Formatting
         max_old_lp_width = max(len(str(e["old_lp"])) for e in entries)
         max_new_lp_width = max(len(str(e["new_lp"])) for e in entries)
         lp_width = max(max_old_lp_width, max_new_lp_width)
+
         for e in entries:
-            old_lp_str = f"{e['old_lp']:>{lp_width}}"  # right-align old LP
-            new_lp_str = f"{e['new_lp']:>{lp_width}}"  # right-align new LP
+            old_lp_str = f"{e['old_lp']:>{lp_width}}"
+            new_lp_str = f"{e['new_lp']:>{lp_width}}"
 
             e["rank_str"] = (
                 f"{dicts.rank_to_acronym[e['old_rank']]}{dicts.rank_to_number[e['old_tier']]} {old_lp_str} LP"
@@ -1028,10 +1055,12 @@ class BotCommands(commands.Cog):
             )
 
         total_lp = sum(e["league_diff"] for e in entries)
-        name_w   = max(len(e["name"]) for e in entries)
-        rank_w   = max(len(e["rank_str"]) for e in entries)
+
+        name_w = max(len(e["name"]) for e in entries)
+        rank_w = max(len(e["rank_str"]) for e in entries)
         lp_w = max(len(f"{e['league_diff']:+}") for e in entries)
         record_w = max(len(f"{e['wins']}-{e['losses']}") for e in entries)
+
         lines = []
         lines.append(
             f"{'Name':<{name_w}}  {'Rank Change':<{rank_w}}  {'LP Δ':>{lp_w}}  {'W-L':>{record_w}}"
@@ -1042,25 +1071,22 @@ class BotCommands(commands.Cog):
             lp_diff_str = f"{e['league_diff']:+}"
             record_str = f"{e['wins']}-{e['losses']}"
 
-            line = (
+            lines.append(
                 f"{e['name']:<{name_w}}  "
                 f"{e['rank_str']:<{rank_w}}  "
                 f"{lp_diff_str:>{lp_w}}  "
                 f"{record_str:>{record_w}}"
             )
-            lines.append(line)
 
         title = f"**Total Server LP Change:** {'+' if total_lp >= 0 else ''}{total_lp}"
 
-        description = "```text\n" + "\n".join(lines) + "\n```"
-
         embed = discord.Embed(
             title=title,
-            description=description,
+            description="```text\n" + "\n".join(lines) + "\n```",
             color=discord.Color.blue()
         )
-        await ctx.send(embed=embed)
 
+        await ctx.send(embed=embed)
     # Redirect user to /link
     @commands.command()
     async def link(self, ctx):
