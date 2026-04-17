@@ -783,7 +783,9 @@ class BotCommands(commands.Cog):
         if embeds or files:
             await ctx.send(files=files, embeds=embeds)
         else:
-            await ctx.send("No valid matches to display.")    @commands.command(name="summary", aliases=["sum","sumw"])
+            await ctx.send("No valid matches to display.")    
+
+    @commands.command(name="summary", aliases=["sum","sumw"])
     async def summary(self, ctx, *args):
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
