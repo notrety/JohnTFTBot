@@ -808,19 +808,25 @@ class BotCommands(commands.Cog):
                 WHERE discord_id = ANY($1)
             ''', members)
             
-            # connected_ids = [row["discord_id"] for row in user_rows]
+            connected_ids = [row["discord_id"] for row in user_rows]
 
-            # async with TaskGroup(asyncio.Semaphore(10)) as tg:
-            #     for member in connected_ids:
-            #         await tg.create_task(
-            #             helpers.update_user_games(
-            #                 self.pool, member, self.tft_token, self.lol_token
-            #             )
-            #         )
+            async with TaskGroup(asyncio.Semaphore(10)) as tg:
+                for member in connected_ids:
+                    await tg.create_task(
+                        helpers.update_user_games(
+                            self.pool, member, self.tft_token, self.lol_token
+                        )
+                    )
 
             print("Finished updating server games.")
 
+            for row in user_rows:
+                print(row['game_name'], row['tag_line'])
             for user_row in user_rows:
+                print(f"Processing {user_row['game_name']}#{user_row['tag_line']}")
+
+                print("  -> fetching rows")
+
                 rows = await conn.fetch('''
                     SELECT placement, elo, game_datetime
                     FROM tft_games
@@ -829,6 +835,11 @@ class BotCommands(commands.Cog):
                     ORDER BY game_datetime DESC;
                 ''', user_row['tft_puuid'], cutoff * 1000)
 
+                print("  -> rows fetched")
+
+                print("  -> fetching first snapshot")
+
+                print([row['placement'] for row in rows])
                 placements = [row['placement'] for row in rows]
 
                 first_snapshot = await conn.fetchrow('''
@@ -840,15 +851,19 @@ class BotCommands(commands.Cog):
                     LIMIT 1;
                 ''', user_row['tft_puuid'], cutoff * 1000)
 
+                print("  -> first snapshot fetched")
                 # 🔹 Snapshot logic using tft_games
-                if rows:
-                    latest_snapshot = rows[0]      # newest game
-                else:
-                    latest_snapshot = first_snapshot
-
-                if not first_snapshot or not latest_snapshot:
-                    print(f"Missing snapshot for {user_row['game_name']}")
+                if not rows and not first_snapshot:
+                    print(f"No data at all for {user_row['game_name']}")
                     continue
+                
+                if not rows:
+                    print(f"No games since cutoff for {user_row['game_name']}")
+                    continue 
+
+                latest_snapshot = rows[0] if rows else first_snapshot
+
+                print(f"[SUMMARY] user={user_row['game_name']} rows={len(rows)} first_snapshot={first_snapshot is not None}")
 
                 # 🔹 Compute LP diff
                 tft_diff = latest_snapshot['elo'] - first_snapshot['elo']
