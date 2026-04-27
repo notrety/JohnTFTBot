@@ -536,7 +536,7 @@ async def get_rank_embed(name, tagLine, region, tft_token, puuid):
                 embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
                 embed.set_author(
                     name=f"TFT Stats for {gameName}#{tagLine}",
-                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/set15",
+                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/",
                     icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/6/67/Teamfight_Tactics_icon.png/revision/latest/scale-to-width/360?cb=20191018215638"
                 )
 

@@ -690,20 +690,18 @@ class BotCommands(commands.Cog):
             matches = [row['match_id'] for row in rows]
             wins = sum(row['win_loss'] for row in rows)
 
-            # 🔹 Snapshot logic using league_games ONLY
+            first_snapshot = await conn.fetchrow('''
+                SELECT elo, game_datetime
+                FROM league_games
+                WHERE league_puuid = $1
+                AND game_datetime < $2
+                ORDER BY game_datetime DESC
+                LIMIT 1;
+            ''', user_row['league_puuid'], cutoff * 1000)
+
             if rows:
                 latest_snapshot = rows[0]
-                first_snapshot = rows[-1]
             else:
-                first_snapshot = await conn.fetchrow('''
-                    SELECT elo, game_datetime
-                    FROM league_games
-                    WHERE league_puuid = $1
-                    AND game_datetime < $2
-                    ORDER BY game_datetime DESC
-                    LIMIT 1;
-                ''', user_row['league_puuid'], cutoff * 1000)
-
                 latest_snapshot = first_snapshot
 
             if not first_snapshot or not latest_snapshot:
@@ -810,15 +808,15 @@ class BotCommands(commands.Cog):
                 WHERE discord_id = ANY($1)
             ''', members)
             
-            connected_ids = [row["discord_id"] for row in user_rows]
+            # connected_ids = [row["discord_id"] for row in user_rows]
 
-            async with TaskGroup(asyncio.Semaphore(10)) as tg:
-                for member in connected_ids:
-                    await tg.create_task(
-                        helpers.update_user_games(
-                            self.pool, member, self.tft_token, self.lol_token
-                        )
-                    )
+            # async with TaskGroup(asyncio.Semaphore(10)) as tg:
+            #     for member in connected_ids:
+            #         await tg.create_task(
+            #             helpers.update_user_games(
+            #                 self.pool, member, self.tft_token, self.lol_token
+            #             )
+            #         )
 
             print("Finished updating server games.")
 
@@ -833,21 +831,19 @@ class BotCommands(commands.Cog):
 
                 placements = [row['placement'] for row in rows]
 
+                first_snapshot = await conn.fetchrow('''
+                    SELECT elo, game_datetime
+                    FROM tft_games
+                    WHERE tft_puuid = $1
+                    AND game_datetime < $2
+                    ORDER BY game_datetime DESC
+                    LIMIT 1;
+                ''', user_row['tft_puuid'], cutoff * 1000)
+
                 # 🔹 Snapshot logic using tft_games
                 if rows:
                     latest_snapshot = rows[0]      # newest game
-                    first_snapshot = rows[-1]      # oldest game in timeframe
                 else:
-                    # fallback: last game before cutoff
-                    first_snapshot = await conn.fetchrow('''
-                        SELECT elo, game_datetime
-                        FROM tft_games
-                        WHERE tft_puuid = $1
-                        AND game_datetime < $2
-                        ORDER BY game_datetime DESC
-                        LIMIT 1;
-                    ''', user_row['tft_puuid'], cutoff * 1000)
-
                     latest_snapshot = first_snapshot
 
                 if not first_snapshot or not latest_snapshot:
@@ -995,21 +991,20 @@ class BotCommands(commands.Cog):
                     continue
 
                 wins = sum(matches)
+                
+                first_snapshot = await conn.fetchrow('''
+                    SELECT elo, game_datetime
+                    FROM league_games
+                    WHERE league_puuid = $1
+                    AND game_datetime < $2
+                    ORDER BY game_datetime DESC
+                    LIMIT 1;
+                ''', user_row['league_puuid'], cutoff * 1000)
 
                 # 🔹 Snapshot logic from league_games
                 if rows:
                     latest_snapshot = rows[0]
-                    first_snapshot = rows[-1]
                 else:
-                    first_snapshot = await conn.fetchrow('''
-                        SELECT elo, game_datetime
-                        FROM league_games
-                        WHERE league_puuid = $1
-                        AND game_datetime < $2
-                        ORDER BY game_datetime DESC
-                        LIMIT 1;
-                    ''', user_row['league_puuid'], cutoff * 1000)
-
                     latest_snapshot = first_snapshot
 
                 if not first_snapshot or not latest_snapshot:
@@ -1227,14 +1222,14 @@ class BotCommands(commands.Cog):
             icon = dicts.tier_to_rank_icon[user_tier]
             if user_tier != "UNRANKED":
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
                 else:
-                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
             else:
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank}**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank}**\n"
                 else:
-                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/set16): {icon} {user_tier} {user_rank}\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank}\n"
         
         if server:
             embed_title= "Server TFT Ranked Leaderboard"
@@ -1484,21 +1479,20 @@ class BotCommands(commands.Cog):
 
             placements = [row['placement'] for row in rows]
 
-            # 🔹 Snapshot logic using tft_games only
+            # most recent game yesterday
+            first_snapshot = await conn.fetchrow('''
+                SELECT elo, game_datetime
+                FROM tft_games
+                WHERE tft_puuid = $1
+                AND game_datetime < $2
+                ORDER BY game_datetime DESC
+                LIMIT 1;
+            ''', user_row['tft_puuid'], cutoff * 1000)
+
             if rows:
                 latest_snapshot = rows[0]      # most recent game today
-                first_snapshot = rows[-1]      # oldest game today
             else:
-                # fallback: get most recent game before cutoff
-                first_snapshot = await conn.fetchrow('''
-                    SELECT elo, game_datetime
-                    FROM tft_games
-                    WHERE tft_puuid = $1
-                    AND game_datetime < $2
-                    ORDER BY game_datetime DESC
-                    LIMIT 1;
-                ''', user_row['tft_puuid'], cutoff * 1000)
-
+                # fallback: if no games today, use yesterday's snapshot as both first and latest
                 latest_snapshot = first_snapshot
 
             print("first_snapshot:", first_snapshot)
@@ -1547,7 +1541,7 @@ class BotCommands(commands.Cog):
 
         embed.set_author(
             name=f"Today: {gameName}#{tagLine}",
-            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(' ', '%20')}-{tagLine}/set16",
+            url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(' ', '%20')}-{tagLine}/",
             icon_url="https://cdn-b.saashub.com/images/app/service_logos/184/6odf4nod5gmf/large.png?1627090832"
         )
 
