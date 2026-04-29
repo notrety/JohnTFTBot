@@ -157,12 +157,12 @@ region_to_mass = {
     "la1": "americas",
     "la2": "americas",
     "na1": "americas",
-    "oc1": "sea",
+    "oc1": "asia",
     "tr1": "europe",
     "ru": "europe",
-    "ph2": "sea",
-    "sg2": "sea",
-    "th2": "sea",
+    "ph2": "asia",
+    "sg2": "asia",
+    "th2": "asia",
     "tw2": "asia",
     "vn2": "asia"
 }
