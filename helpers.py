@@ -12,7 +12,7 @@ import os
 import hashlib
 
 CACHE_DIR = "image_cache"
-current_tft_unix = 1776240000 
+current_tft_unix = 1787742000 
 current_lol_unix = 1767873600
 
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -477,36 +477,6 @@ async def calculate_elo(puuid, game, token, region):
 
         except requests.exceptions.HTTPError as e:
             raise e  # Re-raise other errors
-
-def time_ago(game_end_ts):
-    # Convert from ms → seconds
-    game_end_seconds = game_end_ts / 1000
-    now_seconds = time.time()
-    diff_seconds = int(now_seconds - game_end_seconds)
-
-    minute = 60
-    hour = 60 * minute
-    day = 24 * hour
-    month = 30 * day  # approx
-    year = 12 * month
-
-    if diff_seconds < minute:
-        return f"{diff_seconds} second{'s' if diff_seconds != 1 else ''} ago"
-    elif diff_seconds < hour:
-        minutes = diff_seconds // minute
-        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-    elif diff_seconds < day:
-        hours = diff_seconds // hour
-        return f"{hours} hour{'s' if hours != 1 else ''} ago"
-    elif diff_seconds < month:
-        days = diff_seconds // day
-        return f"{days} day{'s' if days != 1 else ''} ago"
-    elif diff_seconds < year:
-        months = diff_seconds // month
-        return f"{months} month{'s' if months != 1 else ''} ago"
-    else:
-        years = diff_seconds // year
-        return f"{years} year{'s' if years != 1 else ''} ago"
 
 # Function to get TFT rank info from puuid and return embed with rank icon
 async def get_rank_embed(name, tagLine, region, tft_token, puuid):
