@@ -254,24 +254,26 @@ class BotCommands(commands.Cog):
                 item_names = unit["itemNames"]
 
                 custom_rarity = dicts.rarity_map.get(rarity, rarity)
-                champ_icon_path = helpers.get_champ_icon(mappings["champ_mapping"], champion_name).lower()
                 rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
 
-                if champ_icon_path:
-                    champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
-                    champ_task = helpers.fetch_image(champion_url, (64, 64))
-                    rarity_task = helpers.fetch_image(rarity_url, (72, 72))
-                    
-                    icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
+                # champ_icon_path = helpers.get_champ_icon(mappings["champ_mapping"], champion_name).lower()
+                # if champ_icon_path:
+                #     champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
 
-                    champ_unit_data_unsorted.append({
-                        "champion_name": champion_name,
-                        "icon_resized": icon_resized,
-                        "rarity_resized": rarity_resized,
-                        "rarity": rarity,
-                        "tier": tier,
-                        "item_names": item_names
-                    })
+                champion_url = helpers.get_champ_asset(18, champion_name)
+                champ_task = helpers.fetch_image(champion_url, (64, 64))
+                rarity_task = helpers.fetch_image(rarity_url, (72, 72))
+                
+                icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
+
+                champ_unit_data_unsorted.append({
+                    "champion_name": champion_name,
+                    "icon_resized": icon_resized,
+                    "rarity_resized": rarity_resized,
+                    "rarity": rarity,
+                    "tier": tier,
+                    "item_names": item_names
+                })
 
             # Fetch all champion icons & rarity images concurrently
             await asyncio.gather(*[process_unit(unit) for unit in units])

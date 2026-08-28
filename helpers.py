@@ -333,6 +333,16 @@ def get_champ_icon(champs_data, characterName):
     print(f"{characterName} Not Found")
     return None
 
+def clean_character_id(character_id):
+    return character_id.replace("DA", "").replace("AD", "").replace("AP", "").replace("18", "").replace("Small", "").replace("_", "").lower()
+
+def get_champ_asset(set, characterId):
+    characterId = clean_character_id(characterId)
+    if characterId == "luxbase":
+        return f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/assets/characters/tft18_lux/skins/base/images/tft18_lux_splash_tile_7.tft_set18.png"
+    
+    return f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/assets/characters/tft{set}_{characterId}/tft{set}_{characterId}_square.tft_set{set}.png"
+
 # Function to get the item icon path
 def get_item_icon(items_data, itemName):
     for item in items_data:
@@ -429,6 +439,7 @@ async def fetch_image(url: str, size: tuple = None):
         image = Image.open(cache_path).convert("RGBA")
         if size:
             image = image.resize(size, Image.LANCZOS)
+        print("Loaded from cache " + url) # troubleshooting line
         return image
 
     # Otherwise, download the image in a thread
@@ -444,6 +455,7 @@ async def fetch_image(url: str, size: tuple = None):
     if size:
         image = image.resize(size, Image.LANCZOS)
 
+    print("Fetched and cached " + url) # troubleshooting line
     return image
 
 # Function to fetch PUUID
@@ -787,30 +799,46 @@ async def generate_board_preview(index, puuid, region, mass_region, match_id, tf
         item_names = unit["itemNames"]
 
         custom_rarity = dicts.rarity_map.get(rarity, rarity)
-        champ_icon_path = get_champ_icon(mappings["champ_mapping"], champion_name).lower()
+        # champ_icon_path = get_champ_icon(mappings["champ_mapping"], champion_name).lower()
         rarity_url = f"https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-tft-team-planner/global/default/images/cteamplanner_championbutton_tier{custom_rarity}.png"
 
-        if champ_icon_path:
-            champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
-            champ_task = fetch_image(champion_url, (64, 64))
-            rarity_task = fetch_image(rarity_url, (72, 72))
-            
-            icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
+        # if champ_icon_path:
+        #     champion_url = f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_icon_path}.png"
 
-            champ_unit_data_unsorted.append({
-                "champion_name": champion_name,
-                "icon_resized": icon_resized,
-                "rarity_resized": rarity_resized,
-                "rarity": rarity,
-                "tier": tier,
-                "item_names": item_names
-            })
+        champion_url = get_champ_asset(18, champion_name)
+
+        champ_task = fetch_image(champion_url, (64, 64))
+        rarity_task = fetch_image(rarity_url, (72, 72))
+        
+        icon_resized, rarity_resized = await asyncio.gather(champ_task, rarity_task)
+
+        print(f"Finished: {champion_name}")
+
+        champ_unit_data_unsorted.append({
+            "champion_name": champion_name,
+            "icon_resized": icon_resized,
+            "rarity_resized": rarity_resized,
+            "rarity": rarity,
+            "tier": tier,
+            "item_names": item_names
+        })
 
     # Fetch all champion icons & rarity images concurrently
-    await asyncio.gather(*[process_unit(unit) for unit in units])
-    champ_unit_data = sorted(champ_unit_data_unsorted, key=lambda x: x['rarity'])
+    print("Starting gather...")
 
-    # --- Paste Champions & Items ---
+    await asyncio.gather(*[process_unit(unit) for unit in units])
+
+    print("Finished gather!")
+    print(f"Got {len(champ_unit_data_unsorted)} units")
+
+    champ_unit_data = sorted(
+        champ_unit_data_unsorted,
+        key=lambda x: x["rarity"]
+    )
+
+    print("Finished sorting!")
+    print("Finished fetching champion icons and rarity images.")
+
     async def paste_champion(unit, i): 
         champ_image = await champion_image(unit, mappings["item_mapping"])
         if champ_image:

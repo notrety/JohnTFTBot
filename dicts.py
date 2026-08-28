@@ -112,8 +112,8 @@ style_order = {
 # Custom rarity mapping (For some reason api rarity and unit cost are not the same)
 rarity_map = {
     8: 6,
-    6: 5,
-    4: 4,
+    4: 5,
+    3: 4,
     2: 3,
     1: 2,
     0: 1,
