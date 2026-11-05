@@ -438,13 +438,9 @@ class BotCommands(commands.Cog):
                 ''', puuid, game_num)
                 match_id = row['match_id']
         else:
-            error, match_ids, puuid = await helpers.find_match_ids(gameName, tagLine, game_type, "League", mass_region, self.lol_token)
-            if error:
-                return error, None, None, None, None, None, None, None, None
-            match_id = match_ids[game_num]['match_id']
-
-        if not match_id:
-            return f"No recent {game_type} matches found for {gameName}#{tagLine}.",  None, None, None, None, None, None, None, None
+            match_id = await helpers.nth_league_match(self.lol_token, mass_region, puuid, dicts.game_type_to_id.get(game_type), game_num + 1)
+            if not match_id:
+                return f"Could not find match for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None
 
         error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color, True)
         async def process_participant(participant, duration, mappings):

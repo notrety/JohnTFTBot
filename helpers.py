@@ -17,6 +17,51 @@ current_lol_unix = 1767873600
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+_inflight: dict[str, asyncio.Task] = {}
+
+def _cache_path(url: str) -> str:
+    return os.path.join(CACHE_DIR, hashlib.sha256(url.encode()).hexdigest() + ".img")
+
+def _load_sync(url: str) -> Image.Image:
+    """Blocking; runs in a worker thread."""
+    path = _cache_path(url)
+
+    if os.path.exists(path):
+        try:
+            with Image.open(path) as im:
+                return im.convert("RGBA")
+        except Exception:
+            print(f"Corrupt cache entry for {url}, refetching")
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    resp = requests.get(url, timeout=(3, 7))  # (connect, read)
+    resp.raise_for_status()
+
+    # Decode BEFORE caching, so garbage never reaches the cache
+    with Image.open(BytesIO(resp.content)) as im:
+        img = im.convert("RGBA")
+
+    with open(path, "wb") as f:
+        f.write(resp.content)
+
+    print(f"Fetched and cached {url}")
+    return img
+
+async def fetch_image(url: str, size: tuple | None = None) -> Image.Image:
+    # De-duplicate concurrent requests for the same URL
+    task = _inflight.get(url)
+    if task is None:
+        task = asyncio.create_task(asyncio.to_thread(_load_sync, url))
+        _inflight[url] = task
+        task.add_done_callback(lambda _: _inflight.pop(url, None))
+
+    base = await asyncio.shield(task)  # one caller being cancelled won't kill the others
+
+    return base.resize(size, Image.LANCZOS) if size else base.copy()
+
 async def update_db_games(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
         users = await conn.fetch('SELECT discord_id FROM users;')
@@ -330,7 +375,7 @@ def get_champ_icon(champs_data, characterName):
             # Assuming 'champion' dictionary contains a 'squareIcon' key with the icon pat
             return champion.get("tileIcon", "")[:-4]  # Remove the last 4 characters (usually file extension)
     
-    print(f"{characterName} Not Found")
+    print(f"tft champion {characterName} Not Found")
     return None
 
 def clean_character_id(character_id):
@@ -348,14 +393,14 @@ def get_item_icon(items_data, itemName):
     for item in items_data:
         if item.get("nameId") == itemName:
             return item.get("squareIconPath", "")[21:]
-    print(f"{itemName} Not Found")
+    print(f"tft item {itemName} Not Found")
     return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
 
 def get_companion_icon(companions_json, contentId):
     for companion in companions_json:
         if contentId == companion.get("contentId"):
             return companion.get("loadoutsIcon")[21:]
-    print(f"{contentId} Not Found")
+    print(f"companion {contentId} Not Found")
     return None
 
 def get_lol_item_icon(lol_item_json, itemId):
@@ -364,7 +409,7 @@ def get_lol_item_icon(lol_item_json, itemId):
     for item in lol_item_json:
         if itemId == item.get("id"):
             return item.get("iconPath", "")[21:]
-    print(f"{itemId}Not Found")
+    print(f"league item {itemId}Not Found")
     return None
 
 def get_lol_champ_icon(championId):
@@ -374,21 +419,21 @@ def get_keystone_icon(keystones_json, style):
     for keystone in keystones_json:
         if style == keystone.get("id"):
             return keystone.get("iconPath", "")[21:]
-    print(f"{style} Not Found")
+    print(f"keystone {style} Not Found")
     return None
 
 def get_rune_icon(runes_json, style):
     for rune in runes_json:
         if style == rune.get("id"):
             return rune.get("iconPath", "")[21:]
-    print(f"{style} Not Found")
+    print(f"rune {style} Not Found")
     return None
 
 def get_summs_icon(summs_json, summonerId):
     for summ in summs_json:
         if summonerId == summ.get("id"):
             return summ.get("iconPath", "")[21:]
-    print(f"{summ} Not Found")
+    print(f"summoner {summonerId} Not Found")
     return None 
 
 async def get_pfp(region, puuid, lol_token):
@@ -426,37 +471,6 @@ def circular_crop(image: Image.Image) -> Image.Image:
     result.paste(image, (0, 0), mask)
 
     return result
-
-async def fetch_image(url: str, size: tuple = None):
-    print("looking for " + url) # troubleshooting line
-    # Generate a unique filename from the URL
-    url_hash = hashlib.sha256(url.encode()).hexdigest()
-    ext = os.path.splitext(url)[1].split("?")[0] or ".png" or ".svg"
-    cache_path = os.path.join(CACHE_DIR, f"{url_hash}{ext}")
-
-    # Try loading from cache
-    if os.path.exists(cache_path):
-        image = Image.open(cache_path).convert("RGBA")
-        if size:
-            image = image.resize(size, Image.LANCZOS)
-        print("Loaded from cache " + url) # troubleshooting line
-        return image
-
-    # Otherwise, download the image in a thread
-    response = await asyncio.to_thread(requests.get, url)
-    if response.status_code != 200:
-        raise Exception(f"Failed to fetch image from {url} (status {response.status_code})")
-
-    # Save to cache
-    with open(cache_path, "wb") as f:
-        f.write(response.content)
-
-    image = Image.open(BytesIO(response.content)).convert("RGBA")
-    if size:
-        image = image.resize(size, Image.LANCZOS)
-
-    print("Fetched and cached " + url) # troubleshooting line
-    return image
 
 # Function to fetch PUUID
 async def get_puuid(gameName, tagLine, mass_region, riot_token):
@@ -622,49 +636,12 @@ async def find_all_match_ids(puuid, game, mass_region, token, timestamp):
         return f"Error fetching matches for {puuid}: {err}", None
 
 
-async def find_match_ids(gameName, tagLine, mode, game, mass_region, token, num_matches=20):
-    puuid = await get_puuid(gameName, tagLine, mass_region, token)
-    if not puuid:
-        return f"Could not find PUUID for {gameName}#{tagLine}.", None
-
-    try:
-        async with RiotAPIClient(default_headers={"X-Riot-Token": token}) as client:
-            if game == "TFT":
-                match_list = await client.get_tft_match_v1_match_ids_by_puuid(region=mass_region, puuid=puuid)
-            elif game == "League":
-                match_list = await client.get_lol_match_v5_match_ids_by_puuid(region=mass_region, puuid=puuid, queries={"start": 0, "count": num_matches})
-
-            if not match_list:
-                return f"No matches found for {gameName}#{tagLine}.", None, puuid
-
-            target_queue = dicts.game_type_to_id[mode]
-            matching_data = []
-
-            async def mark_match_time(game, match_id, target_queue):
-                if game == "TFT":
-                    match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
-                    queue_id = match_info['info']['queue_id']
-                    if queue_id == target_queue:
-                        matching_data.append({
-                            "match_id": match_id,
-                            "timestamp": match_info['info']['game_datetime']
-                        })
-                elif game == "League":
-                    match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
-                    queue_id = match_info['info']['queueId']
-                    if queue_id == target_queue:
-
-                        matching_data.append({
-                            "match_id": match_id,
-                            "timestamp": match_info['info']['gameEndTimestamp']
-                        })
-
-            await asyncio.gather(*[mark_match_time(game, match_id, target_queue) for match_id in match_list])
-
-            time_sorted = sorted(matching_data, key=lambda x: x["timestamp"], reverse=True)
-            return None, time_sorted, puuid
-    except Exception as err:
-            return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, puuid
+async def nth_league_match(token, region, puuid, queue, n):
+    print(f"Fetching match {n} for PUUID: {puuid} in region: {region} for queue: {queue}")
+    async with RiotAPIClient(default_headers={"X-Riot-Token": token}) as client:
+        ids = await client.get_lol_match_v5_match_ids_by_puuid(region=region, puuid=puuid, queries={"start": n - 1, "count": 1, "queue": queue})
+    print(f"Fetched match IDs: {ids} for PUUID: {puuid}")
+    return ids[0] if ids else None
 
 async def generate_board_preview(index, puuid, region, mass_region, match_id, tft_token, mappings):
 
