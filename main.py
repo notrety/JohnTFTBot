@@ -121,15 +121,20 @@ async def scheduler(pool, interval_minutes=5):
 
     print(f"Background scheduler started. Updating every {interval_minutes} minutes.")
     
+    interval = interval_minutes * 60
     while not bot.is_closed():
-        await asyncio.sleep(interval_minutes * 60)
-
+        cycle_start = asyncio.get_running_loop().time()
         start_time = datetime.datetime.now(eastern).strftime("%Y-%m-%d %H:%M:%S %Z")
         try:
             await helpers.update_db_games(pool, tft_token, lol_token)
-            print(f"Updated games at {start_time}")
+            elapsed = asyncio.get_running_loop().time() - cycle_start
+            print(f"Updated games at {start_time} (cycle took {elapsed:.0f}s)")
         except Exception as e:
             print(f"Scheduler failed at {start_time}: {e}")
+
+        # Next cycle starts `interval` after this one started (immediately if it ran long)
+        elapsed = asyncio.get_running_loop().time() - cycle_start
+        await asyncio.sleep(max(0, interval - elapsed))
 
 
 # Show bot is online and invoke scheduled snapshot functionality

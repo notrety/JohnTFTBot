@@ -427,7 +427,7 @@ class BotCommands(commands.Cog):
         
         background_color = (0,0,0,0)
         if game_type == "Ranked Solo/Duo" and data:
-            await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+            await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token, max_age=60)
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow('''
                     SELECT match_id
@@ -653,7 +653,7 @@ class BotCommands(commands.Cog):
         else:
             return await ctx.send("Must be a linked user to use this command.")
 
-        await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+        await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token, max_age=60)
 
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)
@@ -702,17 +702,24 @@ class BotCommands(commands.Cog):
             else:
                 latest_snapshot = first_snapshot
 
-            if not first_snapshot or not latest_snapshot:
-                await ctx.send("No snapshot data found.")
-                return
+            league_diff = None
 
-            league_diff = latest_snapshot['elo'] - first_snapshot['elo']
+            if (first_snapshot and latest_snapshot
+                    and first_snapshot['elo'] is not None and latest_snapshot['elo'] is not None):
+                league_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-            old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
-            new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+            else:
+                print("Missing snapshot(s)")
+                old_rank = old_tier = old_lp = "N/A"
+                new_rank = new_tier = new_lp = "N/A"
 
         # 🔹 formatting
-        if league_diff < 0:
+        if league_diff is None:
+            lp_diff_emoji = "📈"
+            diff_str = "N/A"
+        elif league_diff < 0:
             lp_diff_emoji = "📉"
             diff_str = str(league_diff)
         else:
@@ -740,42 +747,42 @@ class BotCommands(commands.Cog):
         )
 
         embed.set_thumbnail(url=url)
-        embed.set_footer(text="Last five matches below")
+        embed.set_footer(text="Last five matches below" if matches else "No matches played today")
 
         await ctx.send(embed=embed)
 
+        if not matches:
+            return
+
         # 🔹 Match detail rendering
-        results = []
+        sem = asyncio.Semaphore(2)
 
-        async with TaskGroup(asyncio.Semaphore(20)) as tg:
-            tasks = []
-
-            for match_id in matches[:5]:
-                task = await tg.create_task(
-                    helpers.league_last_match(
-                        gameName, tagLine, mass_region, self.lol_token,
-                        puuid, match_id, game_type, mappings, (0, 0, 0, 0), False
-                    )
+        async def render(match_id):
+            async with sem:
+                return await helpers.league_last_match(
+                    gameName, tagLine, mass_region, self.lol_token,
+                    puuid, match_id, game_type, mappings, (0, 0, 0, 0), False,
                 )
-                tasks.append(task)
 
-        for task in tasks:
-            results.append(task.result())
+        async with ctx.typing():
+            results = await asyncio.gather(
+                *(render(m) for m in matches[:5]), return_exceptions=True
+            )
 
-        embeds = []
-        files = []
-
-        for res in results:
+        embeds, files = [], []
+        for match_id, res in zip(matches[:5], results):
+            if isinstance(res, Exception):
+                print(f"Render failed for {match_id}: {res!r}")
+                continue
             error, final_file, tab_embed, *_ = res
-
             if error:
-                await ctx.send(error)
+                print(f"{match_id}: {error}")
                 continue
             if tab_embed:
                 embeds.append(tab_embed)
             if final_file:
                 files.append(final_file)
-
+                
         if embeds or files:
             await ctx.send(files=files, embeds=embeds)
         else:
@@ -812,7 +819,7 @@ class BotCommands(commands.Cog):
                 for member in connected_ids:
                     await tg.create_task(
                         helpers.update_user_games(
-                            self.pool, member, self.tft_token, self.lol_token
+                            self.pool, member, self.tft_token, self.lol_token, max_age=60
                         )
                     )
 
@@ -981,7 +988,7 @@ class BotCommands(commands.Cog):
                 for member in connected_ids:
                     await tg.create_task(
                         helpers.update_user_games(
-                            self.pool, member, self.tft_token, self.lol_token
+                            self.pool, member, self.tft_token, self.lol_token, max_age=60
                         )
                     )
 
@@ -1455,7 +1462,7 @@ class BotCommands(commands.Cog):
         else:
             return await ctx.send("Must be a linked user to use this command.")
             
-        await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token)
+        await helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token, max_age=60)
 
         eastern = pytz.timezone("America/New_York")
         now = datetime.now(eastern)

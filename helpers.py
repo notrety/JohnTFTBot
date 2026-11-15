@@ -8,6 +8,8 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
 from pulsefire.taskgroups import TaskGroup
+from pulsefire.middlewares import json_response_middleware, http_error_middleware, rate_limiter_middleware
+from pulsefire.ratelimiters import RiotAPIRateLimiter
 import os
 import hashlib
 
@@ -62,178 +64,244 @@ async def fetch_image(url: str, size: tuple | None = None) -> Image.Image:
 
     return base.resize(size, Image.LANCZOS) if size else base.copy()
 
+# ---------------------------------------------------------------------------
+# Riot API clients: background traffic is paced so commands keep priority
+# ---------------------------------------------------------------------------
+
+# Requests/second the background DB updater may use. Personal/dev keys allow
+# 100 requests / 2 min (~0.83 rps), so 0.4 leaves about half for commands.
+BACKGROUND_RPS = float(os.getenv("BACKGROUND_RPS", "0.4"))
+# How many users the background updater processes at once.
+BACKGROUND_CONCURRENCY = int(os.getenv("BACKGROUND_CONCURRENCY", "2"))
+
+# One limiter shared by every client so Riot's real limits are respected globally.
+_SHARED_LIMITER = RiotAPIRateLimiter()
+
+
+class _Pacer:
+    """Spaces out awaiting callers so they run at most `rps` times per second."""
+
+    def __init__(self, rps: float):
+        self.interval = 1.0 / rps if rps > 0 else 0.0
+        self._next = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self):
+        if self.interval <= 0:
+            return
+        async with self._lock:
+            delay = self._next - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._next = time.monotonic() + self.interval
+
+
+_background_pacer = _Pacer(BACKGROUND_RPS)
+
+
+def _pacer_middleware(pacer: _Pacer):
+    def constructor(next):
+        async def middleware(invocation):
+            await pacer.wait()
+            return await next(invocation)
+        return middleware
+    return constructor
+
+
+def riot_client(token, background=False):
+    """Riot API client. Background clients are throttled by the pacer; command clients are not."""
+    middlewares = [json_response_middleware(), http_error_middleware()]
+    if background:
+        middlewares.append(_pacer_middleware(_background_pacer))
+    middlewares.append(rate_limiter_middleware(_SHARED_LIMITER))
+    return RiotAPIClient(default_headers={"X-Riot-Token": token}, middlewares=middlewares)
+
+
+# Per-user coordination between the background updater and commands
+_user_locks: dict[int, asyncio.Lock] = {}
+_last_updated: dict[int, float] = {}
+
+
 async def update_db_games(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
         users = await conn.fetch('SELECT discord_id FROM users;')
-    
-    async with TaskGroup(asyncio.Semaphore(10)) as tg:
+
+    async with TaskGroup(asyncio.Semaphore(BACKGROUND_CONCURRENCY)) as tg:
         for user in users:
-            await tg.create_task(update_user_games(pool, int(user['discord_id']), tft_token, lol_token))
+            await tg.create_task(update_user_games(pool, int(user['discord_id']), tft_token, lol_token, background=True))
 
     print("User games updated.")
 
-async def update_user_games(pool, user_id, tft_token, lol_token):
-    try:
-        async with pool.acquire() as conn:
-            user_id = int(user_id)
-            user = await conn.fetchrow('''
-                SELECT *
-                FROM users
-                WHERE discord_id = $1
-            ''', user_id)
 
-            if not user:
-                print(f"[WARN] No user found with discord_id={user_id}")
-                return
+_LP_UPSERT = """
+    INSERT INTO lp (match_id, puuid, game, update_time, elo)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (puuid)
+    DO UPDATE SET
+        match_id = EXCLUDED.match_id,
+        game = EXCLUDED.game,
+        update_time = EXCLUDED.update_time,
+        elo = EXCLUDED.elo
+    WHERE EXCLUDED.match_id > lp.match_id;
+"""
+
+_LAST_LP_QUERY = '''
+    SELECT match_id, elo, update_time
+    FROM lp
+    WHERE puuid = $1 AND game = $2
+    ORDER BY update_time DESC
+    LIMIT 1
+'''
+
+
+async def update_user_games(pool, user_id, tft_token, lol_token, background=False, max_age=0):
+    """Fetch new ranked games for a user and store them.
+
+    background: pace Riot calls so commands keep priority (used by the scheduler).
+    max_age: skip the update if this user was updated less than max_age seconds ago.
+    """
+    user_id = int(user_id)
+    lock = _user_locks.setdefault(user_id, asyncio.Lock())
+
+    async with lock:
+        if max_age and time.time() - _last_updated.get(user_id, 0) < max_age:
+            print(f"[SKIP] {user_id} updated less than {max_age}s ago")
+            return
+
+        try:
+            # (a) Read state with a short-lived connection
+            async with pool.acquire() as conn:
+                user = await conn.fetchrow('SELECT * FROM users WHERE discord_id = $1', user_id)
+                if not user:
+                    print(f"[WARN] No user found with discord_id={user_id}")
+                    return
+                last_tft_match = await conn.fetchrow(_LAST_LP_QUERY, user['tft_puuid'], 'TFT')
+                last_lol_match = await conn.fetchrow(_LAST_LP_QUERY, user['league_puuid'], 'League')
 
             region = user['region']
             mass_region = user['mass_region']
 
-            # TFT
-            last_tft_match = await conn.fetchrow('''
-                SELECT match_id, elo, update_time
-                FROM lp
-                WHERE puuid = $1 AND game = 'TFT'
-                ORDER BY update_time DESC
-                LIMIT 1
-            ''', user['tft_puuid'])
-
-            # fetch new matches since last seen
+            # (b) Riot API calls, no DB connection held
             last_tft_time = last_tft_match['update_time'] if last_tft_match else current_tft_unix
-            err, tft_match_list = await find_all_match_ids(user['tft_puuid'], "TFT", mass_region, tft_token, max(last_tft_time, current_tft_unix))
-
+            _, tft_match_list = await find_all_match_ids(
+                user['tft_puuid'], "TFT", mass_region, tft_token, max(last_tft_time, current_tft_unix), background
+            )
+            tft_rows, tft_elo = [], None
             if tft_match_list:
-            
-                # add matches one by one to LP table
-                tft_elo = (await calculate_elo(user['tft_puuid'], "TFT", tft_token, region))[0]
-
-                await add_new_match(conn, user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list, tft_elo)
-
-                last_match_id = tft_match_list[0]
-                await conn.execute("""
-                    INSERT INTO lp (match_id, puuid, game, update_time, elo)
-                    VALUES ($1,$2,'TFT',$3,$4)
-                    ON CONFLICT (puuid)
-                    DO UPDATE SET
-                        match_id = EXCLUDED.match_id,
-                        game = EXCLUDED.game,
-                        update_time = EXCLUDED.update_time,
-                        elo = EXCLUDED.elo
-                    WHERE EXCLUDED.match_id > lp.match_id;
-                """,
-                
-                last_match_id,user['tft_puuid'],int(time.time()),tft_elo)
-
-            else:
-                last_tft_match = {'update_time': int(time.time())}
-
-            # --- League ---
-            last_lol_match = await conn.fetchrow('''
-                SELECT match_id, elo, update_time
-                FROM lp
-                WHERE puuid = $1 AND game = 'League'
-                ORDER BY update_time DESC
-                LIMIT 1
-            ''', user['league_puuid'])
+                tft_elo = (await calculate_elo(user['tft_puuid'], "TFT", tft_token, region, background))[0]
+                tft_rows = await fetch_match_rows(user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list, tft_elo, background)
 
             last_lol_time = last_lol_match['update_time'] if last_lol_match else current_lol_unix
-            err, lol_match_list = await find_all_match_ids(
-                user['league_puuid'], "League", mass_region, lol_token, last_lol_time
+            _, lol_match_list = await find_all_match_ids(
+                user['league_puuid'], "League", mass_region, lol_token, last_lol_time, background
             )
-
+            lol_rows, lol_elo = [], None
             if lol_match_list:
-                lol_elo = (await calculate_elo(user['league_puuid'], "League", lol_token, region))[0]
-                await add_new_match(conn, user['league_puuid'], "League", mass_region, lol_token, lol_match_list)
-                last_lol_match_id = lol_match_list[0]
+                lol_elo = (await calculate_elo(user['league_puuid'], "League", lol_token, region, background))[0]
+                lol_rows = await fetch_match_rows(user['league_puuid'], "League", mass_region, lol_token, lol_match_list, lol_elo, background)
 
-                await conn.execute("""
-                    INSERT INTO lp (match_id, puuid, game, update_time, elo)
-                    VALUES ($1, $2, 'League', $3, $4)
-                    ON CONFLICT (puuid)
-                    DO UPDATE SET
-                        match_id = EXCLUDED.match_id,
-                        game = EXCLUDED.game,
-                        update_time = EXCLUDED.update_time,
-                        elo = EXCLUDED.elo
-                    WHERE EXCLUDED.match_id > lp.match_id;
-                """, last_lol_match_id, user['league_puuid'], int(time.time()), lol_elo)
+            # (c) Write results with a short-lived connection
+            if tft_match_list or lol_match_list:
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        if tft_match_list:
+                            await insert_match_rows(conn, "TFT", tft_rows)
+                            await conn.execute(_LP_UPSERT, tft_match_list[0], user['tft_puuid'], 'TFT', int(time.time()), tft_elo)
+                        if lol_match_list:
+                            await insert_match_rows(conn, "League", lol_rows)
+                            await conn.execute(_LP_UPSERT, lol_match_list[0], user['league_puuid'], 'League', int(time.time()), lol_elo)
 
-            else:
-                last_lol_match = {'update_time': int(time.time())}
-
+            _last_updated[user_id] = time.time()
             print(f"[INFO] Updated matches for {user['game_name']}")
 
-    except Exception as e:
-        print(f"[ERROR] update_user_games failed for {user_id}: {e}")
+        except Exception as e:
+            print(f"[ERROR] update_user_games failed for {user_id}: {e}")
 
-    finally:
-        print(f"[DONE] Completed update for {user_id}")
-        
-async def add_new_match(conn, puuid, game, mass_region, token, match_list, elo=None):
+        finally:
+            print(f"[DONE] Completed update for {user_id}")
+
+
+async def fetch_match_rows(puuid, game, mass_region, token, match_list, elo=None, background=False):
+    """Fetch match details from Riot and return insertable rows (ranked, current set only)."""
+    rows = []
     if not match_list:
-        return
-    
+        return rows
+
     target_queues = {
         "TFT": dicts.game_type_to_id["Ranked"],
         "League": dicts.game_type_to_id["Ranked Solo/Duo"]
     }
-    try:
-        async with RiotAPIClient(default_headers={'X-Riot-Token': token}) as client:
-            for match_id in match_list:
-                print(f"Attempting to add {game} match id {match_id} for {puuid}")
+    async with riot_client(token, background) as client:
+        for match_id in match_list:
+            try:
+                print(f"Fetching {game} match id {match_id} for {puuid}")
                 if game == 'TFT':
                     match_info = await client.get_tft_match_v1_match(region=mass_region, id=match_id)
-                    queue_id = match_info['info'].get('queue_id')
-                    if queue_id != target_queues['TFT']:
+                    if match_info['info'].get('queue_id') != target_queues['TFT']:
                         print(f"{game} match id {match_id} not ranked")
                         continue
 
                     game_datetime = match_info['info']['game_datetime']
-                    participants = match_info['info']['participants']
                     if game_datetime < current_tft_unix * 1000:
                         print(f"{game} match id {match_id} before current set, skipping")
                         continue
 
-                    p = next((p for p in participants if p['puuid'] == puuid), None)
+                    p = next((p for p in match_info['info']['participants'] if p['puuid'] == puuid), None)
                     if p:
-                        champions = [c['character_id'] for c in p.get('units', [])]
-                        items = [i for c in p.get('units', []) for i in c.get('itemNames', [])]
+                        units = p.get('units', [])
+                        champions = [c['character_id'] for c in units]
+                        items = [i for c in units for i in c.get('itemNames', [])]
                         traits = [{"name": t["name"], "style": t["style"]} for t in p.get("traits", [])]
-                        await conn.execute(
-                            '''
-                            INSERT INTO tft_games (match_id, tft_puuid, game_datetime, placement, champions, items, traits, damage_dealt, level, elo)
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                            ON CONFLICT (match_id, tft_puuid) DO NOTHING;
-                            ''',
+                        rows.append((
                             match_id, puuid, game_datetime, p['placement'], champions, items, traits,
                             p['total_damage_to_players'], p['level'], elo
-                        )
+                        ))
 
                 elif game == 'League':
                     match_info = await client.get_lol_match_v5_match(region=mass_region, id=match_id)
-                    queue_id = match_info['info'].get('queueId')
-                    if queue_id != target_queues['League']:
+                    if match_info['info'].get('queueId') != target_queues['League']:
                         print(f"{game} match id {match_id} not ranked")
                         continue
 
                     game_datetime = match_info['info']['gameEndTimestamp']
-
                     if game_datetime < current_lol_unix * 1000:
                         print(f"{game} match id {match_id} before current set, skipping")
                         continue
 
-                    participants = match_info['info']['participants']
-                    for p in participants:
-                        if p['puuid'] == puuid:
-                            cs = p['totalMinionsKilled'] + p['neutralMinionsKilled']
-                            await conn.execute('''
-                                INSERT INTO league_games (match_id, league_puuid, game_datetime, win_loss, champion, kills, deaths, assists, cs, game_duration)
-                                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                                ON CONFLICT (match_id, league_puuid) DO NOTHING;
-                            ''', match_id, puuid, game_datetime, p['win'], p['championName'], p['kills'], p['deaths'], p['assists'], cs, match_info['info']['gameDuration'])
-                print(f"Inserting match {match_id}, placement {p['placement']}")
-    except Exception as e:
-        print(f"[ERROR] Failed to insert match {match_id}, placement {p['placement']}: {e}")
+                    p = next((p for p in match_info['info']['participants'] if p['puuid'] == puuid), None)
+                    if p:
+                        cs = p['totalMinionsKilled'] + p['neutralMinionsKilled']
+                        rows.append((
+                            match_id, puuid, game_datetime, p['win'], p['championName'], p['kills'],
+                            p['deaths'], p['assists'], cs, match_info['info']['gameDuration'], elo
+                        ))
+            except Exception as e:
+                print(f"[ERROR] Failed to fetch {game} match {match_id}: {e}")
+    return rows
+
+
+async def insert_match_rows(conn, game, rows):
+    if not rows:
+        return
+    if game == 'TFT':
+        await conn.executemany('''
+            INSERT INTO tft_games (match_id, tft_puuid, game_datetime, placement, champions, items, traits, damage_dealt, level, elo)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (match_id, tft_puuid) DO NOTHING;
+        ''', rows)
+    else:
+        await conn.executemany('''
+            INSERT INTO league_games (match_id, league_puuid, game_datetime, win_loss, champion, kills, deaths, assists, cs, game_duration, elo)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            ON CONFLICT (match_id, league_puuid) DO NOTHING;
+        ''', rows)
+    print(f"Inserted {len(rows)} {game} match(es)")
+
+
+async def add_new_match(conn, puuid, game, mass_region, token, match_list, elo=None):
+    """Fetch and insert in one step (used by find_missing_games)."""
+    rows = await fetch_match_rows(puuid, game, mass_region, token, match_list, elo)
+    await insert_match_rows(conn, game, rows)
 
 async def find_missing_games(pool, tft_token, lol_token):
     async with pool.acquire() as conn:
@@ -309,13 +377,13 @@ async def find_missing_games(pool, tft_token, lol_token):
             print(f"[INFO] Processed {row['game_name']} ({row['discord_id']})")
     print("All missing matches found!")
 
-async def get_rank_info(region, puuid, tft_token):
-    async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
+async def get_rank_info(region, puuid, tft_token, background=False):
+    async with riot_client(tft_token, background) as client:
         info = await client.get_tft_league_v1_entries_by_puuid(region=region, puuid=puuid)
         return info
 
-async def get_lol_rank_info(region, puuid, lol_token):
-    async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
+async def get_lol_rank_info(region, puuid, lol_token, background=False):
+    async with riot_client(lol_token, background) as client:
         info = await client.get_lol_league_v4_entries_by_puuid(region=region, puuid=puuid)
         return info
 
@@ -484,18 +552,18 @@ async def get_puuid(gameName, tagLine, mass_region, riot_token):
         return None
 
 # Function to calculate ranked elo based on given PUUID
-async def calculate_elo(puuid, game, token, region):
+async def calculate_elo(puuid, game, token, region, background=False):
     while True:
         try:
             # Fetch summoner data
             if game == "TFT":
-                rank_info = await get_rank_info(region, puuid, token)
+                rank_info = await get_rank_info(region, puuid, token, background)
                 for entry in rank_info:
                     if entry['queueType'] == 'RANKED_TFT':
                         return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
                 return 0, "UNRANKED", "", 0  # If no ranked TFT entry is found
             else:
-                rank_info = await get_lol_rank_info(region, puuid, token)
+                rank_info = await get_lol_rank_info(region, puuid, token, background)
                 for entry in rank_info:
                     if entry['queueType'] == 'RANKED_SOLO_5x5':
                         return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
@@ -583,12 +651,12 @@ def round_elo_to_rank(avg_elo):
     rank = next((key for key, val in dicts.rank_to_elo.items() if val == rounded_elo), None)
     return rank, 0
 
-async def find_all_match_ids(puuid, game, mass_region, token, timestamp):
+async def find_all_match_ids(puuid, game, mass_region, token, timestamp, background=False):
     match_list = []
     counter = 0
 
     try:
-        async with RiotAPIClient(default_headers={"X-Riot-Token": token}) as client:
+        async with riot_client(token, background) as client:
             while counter < 1000:
                 if game == "TFT":
                     if timestamp:
