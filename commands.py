@@ -440,7 +440,7 @@ class BotCommands(commands.Cog):
                 ''', puuid, game_num)
                 match_id = row['match_id']
         else:
-            match_id = await helpers.nth_league_match(self.lol_token, mass_region, puuid, dicts.game_type_to_id.get(game_type), game_num + 1)
+            match_id = await helpers.nth_league_match(self.lol_token, mass_region, puuid, dicts.game_type_to_id.get(game_type), game_num)
             if not match_id:
                 return f"Could not find match for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None
 
