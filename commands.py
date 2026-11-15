@@ -411,9 +411,7 @@ class BotCommands(commands.Cog):
         }
 
         game_num, gameName, tagLine, user_id, error_message = await helpers.parse_args(ctx, args)
-        if game_num:
-            game_num += 1
-        else:
+        if not game_num:
             game_num = 0
 
         data = False
