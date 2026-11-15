@@ -384,7 +384,7 @@ class BotCommands(commands.Cog):
         os.remove("player_board.png")
 
     # League recent command
-    @commands.command(name="recentleague", aliases=["rl","lr","lrn","lrd","lra","lrf","lrc","lrac","lrq"])
+    @commands.command(name="recentleague", aliases=["rl","lr","lrn","lrd","lra","lrf","lrc","lrac","lrq","lr5"])
     async def recent_league(self, ctx, *args):
         if ctx.invoked_with == "lrn" or ctx.invoked_with == "lrd":
             game_type = "Draft Pick"
@@ -398,6 +398,8 @@ class BotCommands(commands.Cog):
             game_type = "ARAM Clash"
         elif ctx.invoked_with == "lrq":
             game_type = "Swiftplay"
+        elif ctx.invoked_with == "lr5":
+            game_type = "Ranked 5s"
         else:
             game_type = "Ranked Solo/Duo"
 

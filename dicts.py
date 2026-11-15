@@ -79,6 +79,7 @@ game_type_to_id = {
     "ARAM": 450,
     "Swiftplay": 490,
     "Clash": 700,
+    "Ranked 5s": 710,
     "ARAM Clash": 720,
     "Ranked": 1100,
     "Normal": 1090,
