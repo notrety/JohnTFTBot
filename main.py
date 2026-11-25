@@ -137,10 +137,11 @@ async def scheduler(pool, interval_minutes=5):
         await asyncio.sleep(max(0, interval - elapsed))
 
 
-# Store Challenger/Grandmaster cutoffs daily (refreshed hourly, last value of the day is kept)
-async def cutoff_scheduler(pool, interval_minutes=60):
+# Store Challenger/Grandmaster cutoffs once a day per region, at that server's ladder
+# reset time (helpers.LADDER_RESET_TIME, server-local). Checks every minute; a region
+# is only fetched when its reset has passed since it was last stored.
+async def cutoff_scheduler(pool, check_seconds=60):
     await bot.wait_until_ready()
-    eastern = pytz.timezone("America/New_York")
 
     try:
         await helpers.ensure_cutoff_table(pool)
@@ -149,12 +150,11 @@ async def cutoff_scheduler(pool, interval_minutes=60):
         print(f"Cutoff setup failed: {e}")
 
     while not bot.is_closed():
-        today = datetime.datetime.now(eastern).date()
         try:
-            await helpers.update_cutoffs(pool, tft_token, lol_token, region, today)
+            await helpers.update_due_cutoffs(pool, tft_token, lol_token, region)
         except Exception as e:
             print(f"Cutoff update failed: {e}")
-        await asyncio.sleep(interval_minutes * 60)
+        await asyncio.sleep(check_seconds)
 
 
 # Show bot is online and invoke scheduled snapshot functionality

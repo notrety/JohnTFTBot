@@ -3,7 +3,8 @@ import discord
 import requests
 import dicts
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, time as dt_time
+import pytz
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pulsefire.clients import RiotAPIClient
@@ -535,35 +536,97 @@ async def ensure_cutoff_table(pool):
         ''')
 
 
+# Riot recalculates the Grandmaster/Challenger ladders once a day at a fixed local
+# time on each server. Riot doesn't document the exact time, so it is configurable:
+# LADDER_RESET_TIME="HH:MM" in .env (server-local time), default 23:45.
+LADDER_RESET_TIME = os.getenv("LADDER_RESET_TIME", "23:45")
+
+# Server time zone per platform region (unknown regions fall back to UTC)
+REGION_TIMEZONES = {
+    "na1": "America/Los_Angeles",
+    "br1": "America/Sao_Paulo",
+    "la1": "America/Mexico_City",
+    "la2": "America/Santiago",
+    "euw1": "Europe/London",
+    "eun1": "Europe/Warsaw",
+    "tr1": "Europe/Istanbul",
+    "ru": "Europe/Moscow",
+    "kr": "Asia/Seoul",
+    "jp1": "Asia/Tokyo",
+    "oc1": "Australia/Sydney",
+    "ph2": "Asia/Manila",
+    "sg2": "Asia/Singapore",
+    "th2": "Asia/Bangkok",
+    "tw2": "Asia/Taipei",
+    "vn2": "Asia/Ho_Chi_Minh",
+}
+
+# When each (game, region) cutoff was last stored (unix time), and the last failed attempt
+_cutoff_updated_at: dict[tuple[str, str], float] = {}
+_cutoff_failed_at: dict[tuple[str, str], float] = {}
+CUTOFF_RETRY_SECONDS = 600
+
+
+def region_timezone(region):
+    return pytz.timezone(REGION_TIMEZONES.get(region, "UTC"))
+
+
+def last_ladder_reset(region, now=None):
+    """Most recent daily ladder reset for a region, as an aware datetime."""
+    tz = region_timezone(region)
+    now = now or datetime.now(pytz.utc)
+    local_now = now.astimezone(tz)
+    hour, minute = (int(x) for x in LADDER_RESET_TIME.split(":"))
+    reset = tz.localize(datetime(local_now.year, local_now.month, local_now.day, hour, minute))
+    if reset > local_now:
+        reset = tz.localize(datetime.combine(local_now.date() - timedelta(days=1), dt_time(hour, minute)))
+    return reset
+
+
 async def load_cutoffs(pool):
     """Fill the in-memory cache with the most recent stored cutoffs."""
     async with pool.acquire() as conn:
         rows = await conn.fetch('''
-            SELECT DISTINCT ON (game, region) game, region, challenger_lp, grandmaster_lp
+            SELECT DISTINCT ON (game, region) game, region, challenger_lp, grandmaster_lp, updated_at
             FROM rank_cutoffs
-            ORDER BY game, region, snapshot_date DESC;
+            ORDER BY game, region, snapshot_date DESC, updated_at DESC;
         ''')
     for row in rows:
-        _rank_cutoffs[(row['game'], row['region'])] = (row['challenger_lp'], row['grandmaster_lp'])
+        key = (row['game'], row['region'])
+        _rank_cutoffs[key] = (row['challenger_lp'], row['grandmaster_lp'])
+        _cutoff_updated_at[key] = row['updated_at']
 
 
-async def update_cutoffs(pool, tft_token, lol_token, default_region, snapshot_date):
-    """Fetch current cutoffs for every region with linked users and store them under snapshot_date.
+async def update_due_cutoffs(pool, tft_token, lol_token, default_region):
+    """Store new cutoffs for every (game, region) that hasn't been updated since its last ladder reset.
 
-    Re-running on the same date overwrites that day's row, so the stored value is the last one seen that day.
+    Called every minute: normally each region updates once, right after its daily
+    reset. If the bot was offline at reset time, it catches up as soon as it runs,
+    and a region with no stored cutoffs at all is fetched straight away.
+    Each row is stored under the server-local date of the reset.
     """
     async with pool.acquire() as conn:
         regions = {row['region'] for row in await conn.fetch('SELECT DISTINCT region FROM users WHERE region IS NOT NULL;')}
     regions.add(default_region)
 
-    for region in regions:
+    now = time.time()
+    for region in sorted(regions):
+        reset = last_ladder_reset(region)
         for game, token in (("TFT", tft_token), ("League", lol_token)):
+            key = (game, region)
+            if _cutoff_updated_at.get(key, 0) >= reset.timestamp():
+                continue  # already stored since the last reset
+            if now - _cutoff_failed_at.get(key, 0) < CUTOFF_RETRY_SECONDS:
+                continue  # failed recently, wait before retrying
+
             try:
                 chall, gm = await fetch_cutoffs(game, region, token, background=True)
             except Exception as e:
+                _cutoff_failed_at[key] = time.time()
                 print(f"[ERROR] Cutoff fetch failed for {game} {region}: {e}")
                 continue
 
+            updated_at = int(time.time())
             async with pool.acquire() as conn:
                 await conn.execute('''
                     INSERT INTO rank_cutoffs (game, region, snapshot_date, challenger_lp, grandmaster_lp, updated_at)
@@ -572,9 +635,11 @@ async def update_cutoffs(pool, tft_token, lol_token, default_region, snapshot_da
                     DO UPDATE SET challenger_lp = EXCLUDED.challenger_lp,
                                   grandmaster_lp = EXCLUDED.grandmaster_lp,
                                   updated_at = EXCLUDED.updated_at;
-                ''', game, region, snapshot_date, chall, gm, int(time.time()))
-            _rank_cutoffs[(game, region)] = (chall, gm)
-            print(f"[CUTOFF] {game} {region}: Challenger {chall} LP, Grandmaster {gm} LP")
+                ''', game, region, reset.date(), chall, gm, updated_at)
+            _rank_cutoffs[key] = (chall, gm)
+            _cutoff_updated_at[key] = updated_at
+            _cutoff_failed_at.pop(key, None)
+            print(f"[CUTOFF] {game} {region} (reset {reset:%Y-%m-%d %H:%M %Z}): Challenger {chall} LP, Grandmaster {gm} LP")
 
 
 def get_stored_cutoffs(game, region):
