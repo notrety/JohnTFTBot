@@ -1314,7 +1314,19 @@ class BotCommands(commands.Cog):
         await ctx.send(embed=lb_embed)
 
     @commands.command(name="leaguelb", aliases=["leagueleaderboard", "lserver", "lserverlb", "llb"])
-    async def leaguelb(self, ctx):
+    async def leaguelb(self, ctx, queue: str = "solo"):
+        # Which ranked queue to rank by: !llb / !llb flex / !llb 5s
+        queues = {
+            "solo": ("RANKED_SOLO_5x5", "Solo/Duo"),
+            "soloduo": ("RANKED_SOLO_5x5", "Solo/Duo"),
+            "flex": ("RANKED_FLEX_SR", "Flex"),
+            "5s": ("RANKED_PREMADE_5x5", "Ranked 5s"),
+            "5": ("RANKED_PREMADE_5x5", "Ranked 5s"),
+        }
+        if queue.lower() not in queues:
+            return await ctx.send("Queue should be `solo`, `flex` or `5s`, e.g. `!lserver flex`.")
+        queue_type, queue_name = queues[queue.lower()]
+
         data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(ctx.author.id, self.pool, "TFT")
         result = ""
         server = False
@@ -1335,7 +1347,11 @@ class BotCommands(commands.Cog):
 
             try:
                 user_elo, user_tier, user_rank, user_lp = await helpers.calculate_elo(
-                    user['league_puuid'], "League", self.lol_token, user['region'])
+                    user['league_puuid'], "League", self.lol_token, user['region'], queue_type=queue_type)
+
+                # Flex and 5s: only list players who are ranked in that queue
+                if queue_type != "RANKED_SOLO_5x5" and user_tier == "UNRANKED":
+                    return
 
                 name_and_tag = f"{user['game_name']}#{user['tag_line']}"
                 user_elo_and_name.append(
@@ -1367,13 +1383,13 @@ class BotCommands(commands.Cog):
                 result += f"**{index + 1}** - [{name_and_tag}]({profile_url}): {text}\n"
 
         if server:
-            embed_title= "Server LOL Ranked Leaderboard"
+            embed_title= f"Server LOL Ranked {queue_name} Leaderboard"
         else:
-            embed_title= "Overall LOL Ranked Leaderboard"
+            embed_title= f"Overall LOL Ranked {queue_name} Leaderboard"
 
         lb_embed = discord.Embed(
             title=embed_title,
-            description=result,
+            description=result or f"No linked players are ranked in {queue_name}.",
             color=discord.Color.blue()
         )
 
@@ -1669,7 +1685,8 @@ class BotCommands(commands.Cog):
             "`!ls [who]` · Ranked solo/duo stats\n"
             "`!lt [@user]` · Today's solo/duo games and LP change (linked players)\n"
             "`!lsum` / `!lsumw` · Server solo/duo summary for today / the past week\n"
-            "`!llb` / `!lserver` · Bot leaderboard, all players / this server"
+            "`!llb [queue]` / `!lserver [queue]` · Bot leaderboard, all players / this server\n"
+            "> Queues: `solo` (default) · `flex` · `5s`"
         ))
 
         commands_embed.add_field(name="General", inline=False, value=(

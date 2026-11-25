@@ -874,7 +874,7 @@ async def get_puuid(gameName, tagLine, mass_region, riot_token):
         return None
 
 # Function to calculate ranked elo based on given PUUID
-async def calculate_elo(puuid, game, token, region, background=False):
+async def calculate_elo(puuid, game, token, region, background=False, queue_type="RANKED_SOLO_5x5"):
     while True:
         try:
             # Fetch summoner data
@@ -887,7 +887,7 @@ async def calculate_elo(puuid, game, token, region, background=False):
             else:
                 rank_info = await get_lol_rank_info(region, puuid, token, background)
                 for entry in rank_info:
-                    if entry['queueType'] == 'RANKED_SOLO_5x5':
+                    if entry['queueType'] == queue_type:
                         return dicts.rank_to_elo[entry['tier'] + " " + entry['rank']] + int(entry['leaguePoints']), entry['tier'], entry['rank'], entry['leaguePoints']
                 return 0, "UNRANKED", "", 0  # If no ranked League entry is found
 
