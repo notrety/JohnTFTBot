@@ -642,6 +642,36 @@ def get_lol_item_icon(lol_item_json, itemId):
 def get_lol_champ_icon(championId):
     return f"v1/champion-icons/{championId}"
 
+LOL_CDRAGON_BASE = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/"
+
+
+def blank_icon(size):
+    """Transparent placeholder used when an icon can't be found or loaded."""
+    return Image.new("RGBA", size or (1, 1), (0, 0, 0, 0))
+
+
+async def fetch_lol_icon(path, size):
+    """Fetch a League icon by its CommunityDragon path, or a blank placeholder if
+    the path is unknown (e.g. Riot sends rune id 0) or the image fails to load."""
+    if not path:
+        return blank_icon(size)
+    try:
+        return await fetch_image(LOL_CDRAGON_BASE + path.lower(), size)
+    except Exception as e:
+        print(f"[WARN] Icon failed to load ({path}): {e}")
+        return blank_icon(size)
+
+
+def get_perk_ids(participant):
+    """(keystone id, secondary rune tree id) from a match participant; None for any missing part."""
+    styles = participant.get("perks", {}).get("styles", [])
+    keystone = None
+    if styles and styles[0].get("selections"):
+        keystone = styles[0]["selections"][0].get("perk")
+    sub_style = styles[1].get("style") if len(styles) > 1 else None
+    return keystone, sub_style
+
+
 def get_keystone_icon(keystones_json, style):
     for keystone in keystones_json:
         if style == keystone.get("id"):
@@ -1220,24 +1250,25 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     tab_final = Image.new("RGBA", (500, 100), background_color)
 
                     champ_path = get_lol_champ_icon(participant["championId"])
-                    keystone_path = get_keystone_icon(mappings["keystone_mapping"], participant["perks"]["styles"][0]["selections"][0]["perk"]).lower()
-                    runes_path = get_rune_icon(mappings["runes_mapping"], participant["perks"]["styles"][1]["style"]).lower()
-                    summ1_path = get_summs_icon(mappings["summs_mapping"], participant["summoner1Id"]).lower()
-                    summ2_path = get_summs_icon(mappings["summs_mapping"], participant["summoner2Id"]).lower()
+                    keystone_id, sub_style_id = get_perk_ids(participant)
+                    keystone_path = get_keystone_icon(mappings["keystone_mapping"], keystone_id)
+                    runes_path = get_rune_icon(mappings["runes_mapping"], sub_style_id)
+                    summ1_path = get_summs_icon(mappings["summs_mapping"], participant["summoner1Id"])
+                    summ2_path = get_summs_icon(mappings["summs_mapping"], participant["summoner2Id"])
                     items = [participant[f"item{i}"] for i in range(7)]
-                    items_urls = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{get_lol_item_icon(mappings['lol_item_mapping'], item).lower()}" for item in items]
+                    item_paths = [get_lol_item_icon(mappings['lol_item_mapping'], item) for item in items]
 
                     # --- Fetch images concurrently ---
                     fetch_tasks = [
-                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (60,60)),
-                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (30,30)),
-                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (20,20)),
-                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (30,30)),
-                        fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (30,30)),
+                        fetch_lol_icon(f"{champ_path}.png", (60,60)),
+                        fetch_lol_icon(keystone_path, (30,30)),
+                        fetch_lol_icon(runes_path, (20,20)),
+                        fetch_lol_icon(summ1_path, (30,30)),
+                        fetch_lol_icon(summ2_path, (30,30)),
                         fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20)),
                     ]
                     # Add item icons
-                    fetch_tasks.extend([fetch_image(url, (30,30)) for url in items_urls])
+                    fetch_tasks.extend([fetch_lol_icon(p, (30,30)) for p in item_paths])
 
                     images = await asyncio.gather(*fetch_tasks)
                     champ_image, keystone_image, runes_image, summ1_image, summ2_image, gold_image, *item_icons = images

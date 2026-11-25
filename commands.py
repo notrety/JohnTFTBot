@@ -504,24 +504,25 @@ class BotCommands(commands.Cog):
                 gameName = gameName[:14] + "…"
 
             champ_path = helpers.get_lol_champ_icon(participant["championId"])
-            keystone_path = helpers.get_keystone_icon(mappings["keystone_mapping"], participant["perks"]["styles"][0]["selections"][0]["perk"]).lower()
-            runes_path = helpers.get_rune_icon(mappings["runes_mapping"], participant["perks"]["styles"][1]["style"]).lower()
-            summ1_path = helpers.get_summs_icon(mappings["summs_mapping"], participant["summoner1Id"]).lower()
-            summ2_path = helpers.get_summs_icon(mappings["summs_mapping"], participant["summoner2Id"]).lower()
+            keystone_id, sub_style_id = helpers.get_perk_ids(participant)
+            keystone_path = helpers.get_keystone_icon(mappings["keystone_mapping"], keystone_id)
+            runes_path = helpers.get_rune_icon(mappings["runes_mapping"], sub_style_id)
+            summ1_path = helpers.get_summs_icon(mappings["summs_mapping"], participant["summoner1Id"])
+            summ2_path = helpers.get_summs_icon(mappings["summs_mapping"], participant["summoner2Id"])
             items = [participant[f"item{i}"] for i in range(7)]
-            items_urls = [f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{helpers.get_lol_item_icon(mappings['lol_item_mapping'], item).lower()}" for item in items]
+            item_paths = [helpers.get_lol_item_icon(mappings['lol_item_mapping'], item) for item in items]
 
             # --- Fetch images concurrently ---
             fetch_tasks = [
-                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{champ_path}.png", (50,50)),
-                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{keystone_path}", (25,25)),
-                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{runes_path}", (16,16)),
-                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ1_path}", (25,25)),
-                helpers.fetch_image(f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{summ2_path}", (25,25)),
+                helpers.fetch_lol_icon(f"{champ_path}.png", (50,50)),
+                helpers.fetch_lol_icon(keystone_path, (25,25)),
+                helpers.fetch_lol_icon(runes_path, (16,16)),
+                helpers.fetch_lol_icon(summ1_path, (25,25)),
+                helpers.fetch_lol_icon(summ2_path, (25,25)),
                 helpers.fetch_image(f"https://wiki.leagueoflegends.com/en-us/images/thumb/Gold_colored_icon.png/20px-Gold_colored_icon.png?39991", (20,20)),
             ]
             # Add item icons
-            fetch_tasks.extend([helpers.fetch_image(url, (25,25)) for url in items_urls])
+            fetch_tasks.extend([helpers.fetch_lol_icon(p, (25,25)) for p in item_paths])
 
             # Gather all images concurrently
             images = await asyncio.gather(*fetch_tasks)
