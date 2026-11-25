@@ -1636,33 +1636,50 @@ class BotCommands(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    # Command to check all available commands, update as new commands are added (list alphabetically)
+    # Command to list all available commands, update as new commands are added
     @commands.command(name="commands", aliases=["command"])
-    async def commands(self, ctx): 
+    async def commands(self, ctx):
         commands_embed = discord.Embed(
-        title=f"Commands List",
-        description=f"""
-**TFT Commands**:\n
-**!cutoff** - Show the LP cutoffs for Challenger and GM
-**!history | !h** - Display recent TFT placements for a player
-**!lb | !server** - View global/server bot TFT leaderboard
-**!recent | !r** - View the last TFT match played
-**!stats | !s** - Check ranked TFT stats for a player
-**!today | !t** - Gives summary of today's TFT games for a player (BUGGED)
-**\nLeague of Legends Commands**:\n
-**!leaguelb | !lserver** - View global/server bot League leaderboard
-**!leaguestats | !ls** - View a player's League stats
-**!leaguesummary | !lsum | lsumw** - View the server ranked solo/duo summary for the day/week (resets 6am EST)
-**!recentleague | !lr** - View the last League match played postfixes(n,d,a,f,c,ac,q)
-**!todayleague | !lt** - Gives summary of today's League games for a player
-**\nGeneral Commands:**\n
-**!roll** - Rolls a random number (default 1-100)
-**/link** - Link your Riot account to your Discord account
-**!ping** - Test that bot is active
-**!commands** - Get a list of all commands
-        """,
-        color=discord.Color.blue()
+            title="Commands List",
+            description=(
+                "**Choosing a player** (`[who]` below)\n"
+                "Leave it out for yourself, or use `@user` or `name tag` "
+                "(e.g. `!s john_doe NA1`, with `_` in place of spaces).\n"
+                "`[n]` picks a match or count and goes first: `!r 3 @user`."
+            ),
+            color=discord.Color.blue()
         )
+
+        commands_embed.add_field(name="TFT", inline=False, value=(
+            "`!r [n] [who]` · Match details for the nth most recent game (default 1, up to 20)\n"
+            "> Modes: `!r` ranked · `!rn` normal · `!rh` hyper roll · `!rd` double up · `!rg` game modes\n"
+            "`!h [n] [who]` · Placements from the last n games (default 20)\n"
+            "> Modes: `!h` ranked · `!hn` normal · `!hh` hyper roll · `!hd` double up · `!hg` game modes\n"
+            "`!s [who]` · Ranked stats\n"
+            "`!t [@user]` · Today's ranked games and LP change (linked players)\n"
+            "`!sum` / `!sumw` · Server summary for today / the past week\n"
+            "`!lb` / `!server` · Bot leaderboard, all players / this server\n"
+            "`!cutoff` · Challenger and Grandmaster LP cutoffs (TFT and League)"
+        ))
+
+        commands_embed.add_field(name="League of Legends", inline=False, value=(
+            "`!lr [n] [who]` · Match details for the nth most recent game (default 1)\n"
+            "> Modes: `!lr` solo/duo · `!lrf` flex · `!lr5` ranked 5s · `!lrn` draft · "
+            "`!lrq` swiftplay · `!lra` ARAM · `!lrc` clash · `!lrac` ARAM clash\n"
+            "`!ls [who]` · Ranked solo/duo stats\n"
+            "`!lt [@user]` · Today's solo/duo games and LP change (linked players)\n"
+            "`!lsum` / `!lsumw` · Server solo/duo summary for today / the past week\n"
+            "`!llb` / `!lserver` · Bot leaderboard, all players / this server"
+        ))
+
+        commands_embed.add_field(name="General", inline=False, value=(
+            "`/link name tag region` · Link your Riot account (needed for `!t`, `!lt` and summaries)\n"
+            "`!roll [max]` · Random number from 1 to max (default 100)\n"
+            "`!ping` · Check the bot is online\n"
+            "`!commands` · Show this list"
+        ))
+
+        commands_embed.set_footer(text="Days reset at 6am Eastern")
         await ctx.send(embed=commands_embed)
 
 # Add this class as a cog to main
