@@ -1216,7 +1216,7 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Function to grab previous match data
-async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color, header):
+async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color, header, lp_delta=None):
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
 
@@ -1331,6 +1331,12 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     draw.text((15,23), end_str, font=font, fill="white")
                     draw.text((15,61), result_str, font=font, fill="white")
                     draw.text((15,81), time_str, font=font, fill="white")
+                    if lp_delta is not None:
+                        # Right-aligned in the empty space between the result/duration and the champion icon
+                        lp_str = f"{lp_delta:+d} LP"
+                        lp_color = "#5485eb" if lp_delta > 0 else "#e64253" if lp_delta < 0 else "#8a8a8a"
+                        lp_x = 160 - draw.textlength(lp_str, font=bold_font)
+                        draw.text((lp_x, 70), lp_str, font=bold_font, fill=lp_color)
                     draw.text((295,0), kda_str, font=bold_font, fill="white")
                     draw.text((295,26), kda_ratio_str, font=font, fill=kda_color)
                     draw.text((390,0), kp_str, font=font, fill="white")
