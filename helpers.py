@@ -464,10 +464,78 @@ async def get_rank_info(region, puuid, tft_token, background=False):
         info = await client.get_tft_league_v1_entries_by_puuid(region=region, puuid=puuid)
         return info
 
-async def get_lol_rank_info(region, puuid, lol_token, background=False):
+# Short-lived cache so one command doesn't look up the same player's rank twice
+# (e.g. !lr uses ranks for both the lobby average and the team pictures)
+_LOL_RANK_TTL = 120
+_lol_rank_cache: dict[tuple[str, str], tuple[float, list]] = {}
+_lol_rank_inflight: dict[tuple[str, str], asyncio.Task] = {}
+
+
+async def _fetch_lol_rank_info(region, puuid, lol_token, background):
     async with riot_client(lol_token, background) as client:
-        info = await client.get_lol_league_v4_entries_by_puuid(region=region, puuid=puuid)
-        return info
+        return await client.get_lol_league_v4_entries_by_puuid(region=region, puuid=puuid)
+
+
+async def get_lol_rank_info(region, puuid, lol_token, background=False):
+    key = (region, puuid)
+    cached = _lol_rank_cache.get(key)
+    if cached and time.monotonic() - cached[0] < _LOL_RANK_TTL:
+        return cached[1]
+
+    task = _lol_rank_inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(_fetch_lol_rank_info(region, puuid, lol_token, background))
+        _lol_rank_inflight[key] = task
+        task.add_done_callback(lambda _: _lol_rank_inflight.pop(key, None))
+    info = await asyncio.shield(task)
+    _lol_rank_cache[key] = (time.monotonic(), info)
+    return info
+
+
+async def lobby_average_label(participants, region, lol_token):
+    """Solo/Duo lobby average: "Avg 245 LP" for Master+, otherwise e.g. "Avg D2". None if nobody is ranked."""
+    async def player_elo(p):
+        try:
+            entries = await get_lol_rank_info(region, p["puuid"], lol_token)
+        except Exception as e:
+            print(f"[WARN] Rank lookup failed for lobby average: {e}")
+            return None
+        for entry in entries or []:
+            if entry.get("queueType") == "RANKED_SOLO_5x5":
+                base = dicts.rank_to_elo.get(f"{entry['tier']} {entry['rank']}")
+                if base is not None:
+                    return base + int(entry.get("leaguePoints", 0))
+        return None
+
+    elos = [e for e in await asyncio.gather(*(player_elo(p) for p in participants)) if e is not None]
+    if not elos:
+        return None
+    avg = round(sum(elos) / len(elos))
+    if avg >= APEX_ELO:
+        return f"Avg {avg - APEX_ELO} LP"
+    tier, division, _ = lp_to_div(avg)
+    return f"Avg {dicts.rank_to_acronym.get(tier, tier[:1])}{dicts.rank_to_number.get(division, '')}"
+
+
+APEX_TIERS = {"MASTER", "GRANDMASTER", "CHALLENGER"}
+
+
+def rank_label(tier, rank):
+    """Short rank text like "D2". Apex tiers have no divisions and unranked players have
+    no rank, so those are just "M", "GM", "C" or "U"."""
+    acronym = dicts.rank_to_acronym.get(tier, tier[:1])
+    if tier in APEX_TIERS or tier == "UNRANKED":
+        return acronym
+    return f"{acronym}{dicts.rank_to_number.get(rank, '')}"
+
+
+def _fit_font(draw, text, path, size, max_width, min_size=11):
+    """Largest font (from size down to min_size) whose text fits in max_width."""
+    font = ImageFont.truetype(path, size)
+    while size > min_size and draw.textlength(text, font=font) > max_width:
+        size -= 1
+        font = ImageFont.truetype(path, size)
+    return font
 
 # ---------------------------------------------------------------------------
 # Challenger / Grandmaster LP cutoffs (stored daily in the rank_cutoffs table)
@@ -1065,7 +1133,7 @@ async def generate_board_preview(index, puuid, region, mass_region, match_id, tf
                 tier = entry['tier']
                 rank = entry['rank']
 
-    rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
+    rank_str = rank_label(tier, rank)
 
     bbox = font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
     text_w = bbox[2] - bbox[0]
@@ -1281,7 +1349,7 @@ async def last_match(gameName, tagLine, mode, mass_region, tft_token, region, ga
         return f"Error fetching last match for {gameName}#{tagLine}: {err}", None, None, 0, None
 
 # Function to grab previous match data
-async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color, header, lp_delta=None):
+async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, match_id, mode, mappings, background_color, header, lp_delta=None, region=None):
     try:
         async with RiotAPIClient(default_headers={"X-Riot-Token": lol_token}) as client:
 
@@ -1294,6 +1362,9 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
             maxTaken = participants[0]["totalDamageTaken"]
             blue_team = [p for p in participants if p["teamId"] == 100]
             red_team = [p for p in participants if p["teamId"] == 200]
+
+            # Lobby average Solo/Duo rank, drawn above the LP change (only when a platform region is given)
+            lobby_avg = await lobby_average_label(participants, region, lol_token) if region else None
 
             blue_win = match_info["info"]["teams"][0]["win"]
             remake = False
@@ -1396,12 +1467,19 @@ async def league_last_match(gameName, tagLine, mass_region, lol_token, puuid, ma
                     draw.text((15,23), end_str, font=font, fill="white")
                     draw.text((15,61), result_str, font=font, fill="white")
                     draw.text((15,81), time_str, font=font, fill="white")
+                    # Two lines right-aligned in the space between result/duration and the champion icon:
+                    # lobby average on the result row, LP change on the duration row
+                    side_right = 165
+                    side_width = side_right - (15 + max(draw.textlength(result_str, font=font),
+                                                        draw.textlength(time_str, font=font)) + 8)
+                    if lobby_avg:
+                        avg_font = _fit_font(draw, lobby_avg, "fonts/NotoSans-Bold.ttf", 15, side_width)
+                        draw.text((side_right - draw.textlength(lobby_avg, font=avg_font), 61), lobby_avg, font=avg_font, fill="white")
                     if lp_delta is not None:
-                        # Right-aligned in the empty space between the result/duration and the champion icon
                         lp_str = f"{lp_delta:+d} LP"
                         lp_color = "#5485eb" if lp_delta > 0 else "#e64253" if lp_delta < 0 else "#8a8a8a"
-                        lp_x = 160 - draw.textlength(lp_str, font=bold_font)
-                        draw.text((lp_x, 70), lp_str, font=bold_font, fill=lp_color)
+                        lp_font = _fit_font(draw, lp_str, "fonts/NotoSans-Black.ttf", 15, side_width)
+                        draw.text((side_right - draw.textlength(lp_str, font=lp_font), 81), lp_str, font=lp_font, fill=lp_color)
                     draw.text((295,0), kda_str, font=bold_font, fill="white")
                     draw.text((295,26), kda_ratio_str, font=font, fill=kda_color)
                     draw.text((390,0), kp_str, font=font, fill="white")

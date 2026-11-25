@@ -239,7 +239,7 @@ class BotCommands(commands.Cog):
                         tier = entry['tier']
                         rank = entry['rank']
 
-            rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
+            rank_str = helpers.rank_label(tier, rank)
 
             bbox = font.getbbox(rank_str)  # (x_min, y_min, x_max, y_max)
             text_w = bbox[2] - bbox[0]
@@ -466,7 +466,7 @@ class BotCommands(commands.Cog):
         if game_type == "Ranked Solo/Duo" and data:
             lp_delta = await helpers.get_match_lp_delta(self.pool, "League", puuid, match_id)
 
-        error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color, True, lp_delta=lp_delta)
+        error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color, True, lp_delta=lp_delta, region=region)
         async def process_participant(participant, duration, mappings):
             items = []
             gameName = participant["riotIdGameName"]
@@ -582,7 +582,7 @@ class BotCommands(commands.Cog):
             elif kda_ratio >= 3.00:
                 kda_color = "#29b0a3"
 
-            rank_str = f"{dicts.rank_to_acronym[tier]}{dicts.rank_to_number[rank]}"
+            rank_str = helpers.rank_label(tier, rank)
             damage_str = f"{damagedealt/1000:.1f}k"
             participant_gold_str = f"{participant["goldEarned"]/1000:.1f}k"
 
