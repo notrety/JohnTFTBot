@@ -106,6 +106,7 @@ class BotCommands(commands.Cog):
         if not gameNum:
             gameNum = 1
 
+        data = False
         if user_id:
             data, gameName, tagLine, region, mass_region, puuid = await helpers.check_data(user_id, self.pool, "TFT")
         else:
@@ -116,7 +117,22 @@ class BotCommands(commands.Cog):
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
 
-        result, match_id, avg_rank, master_plus_lp, time, player_placement = await helpers.last_match(gameName, tagLine, game_type, mass_region, self.tft_token, region, gameNum)
+        show_lp = game_type == "Ranked" and data
+        last_match_task = helpers.last_match(gameName, tagLine, game_type, mass_region, self.tft_token, region, gameNum)
+        if show_lp:
+            # Make sure the game is stored (for its LP change) while the match loads
+            (result, match_id, avg_rank, master_plus_lp, time, player_placement), _ = await asyncio.gather(
+                last_match_task,
+                helpers.update_user_games(self.pool, user_id, self.tft_token, self.lol_token, max_age=60),
+            )
+        else:
+            result, match_id, avg_rank, master_plus_lp, time, player_placement = await last_match_task
+
+        lp_line = ""
+        if show_lp and match_id:
+            delta = await helpers.get_match_lp_delta(self.pool, "TFT", puuid, match_id)
+            if delta is not None:
+                lp_line = helpers.format_lp_delta(delta) + "\n"
 
         embed_colors = ['#F0B52B', "#B8B5B5", '#A45F00', '#595988', "#748283", '#748283', '#748283', '#748283']
         embed = discord.Embed(
@@ -125,7 +141,7 @@ class BotCommands(commands.Cog):
             color=discord.Color(int(embed_colors[player_placement - 1].strip("#"), 16))
         )
 
-        embed.set_footer(text=f"Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
+        embed.set_footer(text=f"{lp_line}Average Lobby Rank: {avg_rank} {master_plus_lp} LP\nTimestamp: {time}" if master_plus_lp else f"{lp_line}Average Lobby Rank: {avg_rank}\nTimestamp: {time}")
         await ctx.send(embed=embed)
 
         async with RiotAPIClient(default_headers={"X-Riot-Token": self.tft_token}) as client:
@@ -443,6 +459,11 @@ class BotCommands(commands.Cog):
                 return f"Could not find match for {gameName}#{tagLine}.", None, None, None, None, None, None, None, None
 
         error, final_file, tab_embed, max_damage, max_taken, duration, blue_team, red_team, blue_win  = await helpers.league_last_match(gameName, tagLine, mass_region, self.lol_token, puuid, match_id, game_type, mappings, background_color, True)
+
+        if game_type == "Ranked Solo/Duo" and data and tab_embed:
+            delta = await helpers.get_match_lp_delta(self.pool, "League", puuid, match_id)
+            if delta is not None:
+                tab_embed.set_footer(text=helpers.format_lp_delta(delta))
         async def process_participant(participant, duration, mappings):
             items = []
             gameName = participant["riotIdGameName"]
@@ -693,6 +714,7 @@ class BotCommands(commands.Cog):
                 FROM league_games
                 WHERE league_puuid = $1
                 AND game_datetime < $2
+                AND elo IS NOT NULL
                 ORDER BY game_datetime DESC
                 LIMIT 1;
             ''', user_row['league_puuid'], cutoff * 1000)
@@ -708,8 +730,8 @@ class BotCommands(commands.Cog):
                     and first_snapshot['elo'] is not None and latest_snapshot['elo'] is not None):
                 league_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
-                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'], "League", region)
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'], "League", region)
             else:
                 print("Missing snapshot(s)")
                 old_rank = old_tier = old_lp = "N/A"
@@ -852,6 +874,7 @@ class BotCommands(commands.Cog):
                     FROM tft_games
                     WHERE tft_puuid = $1
                     AND game_datetime < $2
+                    AND elo IS NOT NULL
                     ORDER BY game_datetime DESC
                     LIMIT 1;
                 ''', user_row['tft_puuid'], cutoff * 1000)
@@ -870,11 +893,16 @@ class BotCommands(commands.Cog):
 
                 print(f"[SUMMARY] user={user_row['game_name']} rows={len(rows)} first_snapshot={first_snapshot is not None}")
 
+                # Skip players without a starting snapshot that has an elo
+                if (not first_snapshot or first_snapshot['elo'] is None
+                        or latest_snapshot['elo'] is None):
+                    continue
+
                 # 🔹 Compute LP diff
                 tft_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
-                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'], "TFT", user_row['region'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'], "TFT", user_row['region'])
 
                 entries.append({
                     "name": f"{user_row['game_name']}#{user_row['tag_line']}",
@@ -1017,6 +1045,7 @@ class BotCommands(commands.Cog):
                     FROM league_games
                     WHERE league_puuid = $1
                     AND game_datetime < $2
+                    AND elo IS NOT NULL
                     ORDER BY game_datetime DESC
                     LIMIT 1;
                 ''', user_row['league_puuid'], cutoff * 1000)
@@ -1030,11 +1059,16 @@ class BotCommands(commands.Cog):
                 if not first_snapshot or not latest_snapshot:
                     continue
 
+                # Skip players without a starting snapshot that has an elo
+                if (not first_snapshot or first_snapshot['elo'] is None
+                        or latest_snapshot['elo'] is None):
+                    continue
+
                 # 🔹 LP diff
                 league_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
-                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'], "League", user_row['region'])
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'], "League", user_row['region'])
 
                 entries.append({
                     "name": f"{user_row['game_name']}#{user_row['tag_line']}",
@@ -1186,9 +1220,20 @@ class BotCommands(commands.Cog):
                     region,
                     mass_region
                 )
+        # Fetch this season's ranked games in the background. For an account that was
+        # already linked this is just a normal incremental update.
+        new_account = not row or old_tft_puuid != tft_puuid or old_lol_puuid != lol_puuid
+        helpers.start_backfill(self.pool, user_id, self.tft_token, self.lol_token)
+
+        backfill_note = (
+            "\nYour ranked games from this season are being loaded in the background. "
+            "This can take a few minutes, and stats will fill in as it finishes."
+            if new_account else ""
+        )
         await interaction.response.send_message(
             f"Your data has been linked/updated: {name}#{tag} in region {region}. "
-            "If this looks incorrect, re-link using `/link <name> <tag>`.",
+            "If this looks incorrect, re-link using `/link <name> <tag>`."
+            f"{backfill_note}",
             ephemeral=True
         )
 
@@ -1333,10 +1378,25 @@ class BotCommands(commands.Cog):
     # Commnad to check the lp cutoff for challenger and grandmaster
     @commands.command(name="cutoff", aliases=["cutoffs", "challenger", "grandmaster", "grandmasters", "lpcutoff", "chall", "gm"])
     async def cutoff(self, ctx):
-        challenger_cutoff, grandmaster_cutoff = await helpers.get_cutoff(self.tft_token, self.region)
+        sections = []
+        for game, token in (("TFT", self.tft_token), ("League", self.lol_token)):
+            cutoffs = helpers.get_stored_cutoffs(game, self.region)
+            if not cutoffs:
+                try:
+                    cutoffs = await helpers.fetch_cutoffs(game, self.region, token)
+                except Exception as e:
+                    print(f"Cutoff fetch failed for {game}: {e}")
+                    sections.append(f"**{game}**\nUnavailable")
+                    continue
+            challenger_cutoff, grandmaster_cutoff = cutoffs
+            sections.append(
+                f"**{game}**\n"
+                f"<:RankChallenger:1336405530444431492> Challenger Cutoff: {challenger_cutoff}\n"
+                f"<:RankGrandmaster:1336405512887078923> Grandmaster Cutoff: {grandmaster_cutoff}"
+            )
         cutoff_embed = discord.Embed(
             title=f"Cutoff LPs",
-            description=f"<:RankChallenger:1336405530444431492> Challenger Cutoff: {challenger_cutoff}\n<:RankGrandmaster:1336405512887078923> Grandmaster Cutoff: {grandmaster_cutoff}",
+            description="\n\n".join(sections),
             color=discord.Color.blue()
         )
         await ctx.send(embed=cutoff_embed)
@@ -1505,6 +1565,7 @@ class BotCommands(commands.Cog):
                 FROM tft_games
                 WHERE tft_puuid = $1
                 AND game_datetime < $2
+                AND elo IS NOT NULL
                 ORDER BY game_datetime DESC
                 LIMIT 1;
             ''', user_row['tft_puuid'], cutoff * 1000)
@@ -1520,11 +1581,12 @@ class BotCommands(commands.Cog):
 
             tft_diff = 0  
 
-            if first_snapshot and latest_snapshot:
+            if (first_snapshot and latest_snapshot
+                    and first_snapshot['elo'] is not None and latest_snapshot['elo'] is not None):
                 tft_diff = latest_snapshot['elo'] - first_snapshot['elo']
 
-                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'])
-                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'])
+                old_rank, old_tier, old_lp = helpers.lp_to_div(first_snapshot['elo'], "TFT", region)
+                new_rank, new_tier, new_lp = helpers.lp_to_div(latest_snapshot['elo'], "TFT", region)
             else:
                 print("Missing snapshot(s)")
                 old_rank = old_tier = old_lp = "N/A"

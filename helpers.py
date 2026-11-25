@@ -11,6 +11,7 @@ from pulsefire.taskgroups import TaskGroup
 from pulsefire.middlewares import json_response_middleware, http_error_middleware, rate_limiter_middleware
 from pulsefire.ratelimiters import RiotAPIRateLimiter
 import os
+import re
 import hashlib
 
 CACHE_DIR = "image_cache"
@@ -120,6 +121,18 @@ def riot_client(token, background=False):
 # Per-user coordination between the background updater and commands
 _user_locks: dict[int, asyncio.Lock] = {}
 _last_updated: dict[int, float] = {}
+# Users whose full-season backfill is running; other updates skip them meanwhile
+_backfilling: set[int] = set()
+# Keep references to backfill tasks so they aren't garbage collected
+_backfill_tasks: set[asyncio.Task] = set()
+
+
+def _only_newest_gets_elo(rows):
+    """On a first sync only the newest game's elo is known (the current rank); clear the rest.
+
+    Rows are newest first and elo is the last column.
+    """
+    return rows[:1] + [row[:-1] + (None,) for row in rows[1:]]
 
 
 async def update_db_games(pool, tft_token, lol_token):
@@ -154,13 +167,20 @@ _LAST_LP_QUERY = '''
 '''
 
 
-async def update_user_games(pool, user_id, tft_token, lol_token, background=False, max_age=0):
+async def update_user_games(pool, user_id, tft_token, lol_token, background=False, max_age=0, _backfill=False):
     """Fetch new ranked games for a user and store them.
 
     background: pace Riot calls so commands keep priority (used by the scheduler).
     max_age: skip the update if this user was updated less than max_age seconds ago.
+
+    If a game has no lp row yet (first sync, e.g. a newly linked account), every
+    ranked game since current_tft_unix / current_lol_unix is fetched, and only the
+    newest one gets the current elo.
     """
     user_id = int(user_id)
+    if user_id in _backfilling and not _backfill:
+        print(f"[SKIP] {user_id} is being backfilled")
+        return
     lock = _user_locks.setdefault(user_id, asyncio.Lock())
 
     async with lock:
@@ -190,6 +210,8 @@ async def update_user_games(pool, user_id, tft_token, lol_token, background=Fals
             if tft_match_list:
                 tft_elo = (await calculate_elo(user['tft_puuid'], "TFT", tft_token, region, background))[0]
                 tft_rows = await fetch_match_rows(user['tft_puuid'], "TFT", mass_region, tft_token, tft_match_list, tft_elo, background)
+                if not last_tft_match:
+                    tft_rows = _only_newest_gets_elo(tft_rows)
 
             last_lol_time = last_lol_match['update_time'] if last_lol_match else current_lol_unix
             _, lol_match_list = await find_all_match_ids(
@@ -199,6 +221,8 @@ async def update_user_games(pool, user_id, tft_token, lol_token, background=Fals
             if lol_match_list:
                 lol_elo = (await calculate_elo(user['league_puuid'], "League", lol_token, region, background))[0]
                 lol_rows = await fetch_match_rows(user['league_puuid'], "League", mass_region, lol_token, lol_match_list, lol_elo, background)
+                if not last_lol_match:
+                    lol_rows = _only_newest_gets_elo(lol_rows)
 
             # (c) Write results with a short-lived connection
             if tft_match_list or lol_match_list:
@@ -219,6 +243,30 @@ async def update_user_games(pool, user_id, tft_token, lol_token, background=Fals
 
         finally:
             print(f"[DONE] Completed update for {user_id}")
+
+
+async def backfill_user_games(pool, user_id, tft_token, lol_token):
+    """Fetch a newly linked user's ranked games since current_tft_unix / current_lol_unix.
+
+    Runs paced like the background updater. Commands and the scheduler skip this
+    user until it finishes, so nobody waits on it.
+    """
+    user_id = int(user_id)
+    _backfilling.add(user_id)
+    start = time.monotonic()
+    try:
+        await update_user_games(pool, user_id, tft_token, lol_token, background=True, _backfill=True)
+        print(f"[BACKFILL] Finished for {user_id} in {time.monotonic() - start:.0f}s")
+    finally:
+        _backfilling.discard(user_id)
+
+
+def start_backfill(pool, user_id, tft_token, lol_token):
+    """Start a backfill in the background without waiting for it."""
+    task = asyncio.create_task(backfill_user_games(pool, user_id, tft_token, lol_token))
+    _backfill_tasks.add(task)
+    task.add_done_callback(_backfill_tasks.discard)
+    return task
 
 
 async def fetch_match_rows(puuid, game, mass_region, token, match_list, elo=None, background=False):
@@ -296,6 +344,39 @@ async def insert_match_rows(conn, game, rows):
             ON CONFLICT (match_id, league_puuid) DO NOTHING;
         ''', rows)
     print(f"Inserted {len(rows)} {game} match(es)")
+
+
+async def get_match_lp_delta(pool, game, puuid, match_id):
+    """LP change from a stored ranked game: its elo minus the player's previous game's elo.
+
+    Returns None when it can't be known reliably: the game isn't stored, it or the
+    previous game has no elo, or it shares its elo with a neighbouring game (several
+    games found in one update get the same elo, so the split between them is unknown).
+    """
+    table, puuid_col = ("tft_games", "tft_puuid") if game == "TFT" else ("league_games", "league_puuid")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(f'''
+            SELECT elo, prev_elo, next_elo
+            FROM (
+                SELECT match_id, elo,
+                       LAG(elo) OVER w AS prev_elo,
+                       LEAD(elo) OVER w AS next_elo
+                FROM {table}
+                WHERE {puuid_col} = $1
+                WINDOW w AS (ORDER BY game_datetime)
+            ) t
+            WHERE match_id = $2;
+        ''', puuid, match_id)
+
+    if not row or row['elo'] is None or row['prev_elo'] is None:
+        return None
+    if row['elo'] == row['prev_elo'] or row['elo'] == row['next_elo']:
+        return None
+    return row['elo'] - row['prev_elo']
+
+
+def format_lp_delta(delta):
+    return f"LP: +{delta}" if delta >= 0 else f"LP: {delta}"
 
 
 async def add_new_match(conn, puuid, game, mass_region, token, match_list, elo=None):
@@ -387,44 +468,118 @@ async def get_lol_rank_info(region, puuid, lol_token, background=False):
         info = await client.get_lol_league_v4_entries_by_puuid(region=region, puuid=puuid)
         return info
 
-# Function to return cutoff lp for challenger and grandmaster
+# ---------------------------------------------------------------------------
+# Challenger / Grandmaster LP cutoffs (stored daily in the rank_cutoffs table)
+# ---------------------------------------------------------------------------
+
+APEX_ELO = 2800  # elo at Master 0 LP (see dicts.rank_to_elo)
+
+# Spots per tier and minimum LP per region. Riot changes these occasionally, so
+# check the current values for your regions if cutoffs look off.
+CUTOFF_RULES = {
+    "TFT":    {"chall_spots": 250, "gm_spots": 500, "chall_min": 500, "gm_min": 200},
+    "League": {"chall_spots": 300, "gm_spots": 700, "chall_min": 500, "gm_min": 200},
+}
+
+# Latest known cutoffs: {(game, region): (challenger_lp, grandmaster_lp)}
+_rank_cutoffs: dict[tuple[str, str], tuple[int, int]] = {}
+
+
+def _compute_cutoffs(lps, rules):
+    """Return (challenger_lp, grandmaster_lp) from every Master+ player's LP."""
+    lps = sorted(lps, reverse=True)
+    chall_idx = rules["chall_spots"] - 1
+    gm_idx = rules["chall_spots"] + rules["gm_spots"] - 1
+    chall = max(rules["chall_min"], lps[chall_idx]) if len(lps) > chall_idx else rules["chall_min"]
+    gm = max(rules["gm_min"], lps[gm_idx]) if len(lps) > gm_idx else rules["gm_min"]
+    return chall, gm
+
+
+async def fetch_cutoffs(game, region, token, background=False):
+    """Fetch the Master, Grandmaster and Challenger ladders from Riot and compute the cutoffs."""
+    async with riot_client(token, background) as client:
+        if game == "TFT":
+            leagues = await asyncio.gather(
+                client.get_tft_league_v1_challenger_league(region=region),
+                client.get_tft_league_v1_grandmaster_league(region=region),
+                client.get_tft_league_v1_master_league(region=region),
+            )
+        else:
+            queue = "RANKED_SOLO_5x5"
+            leagues = await asyncio.gather(
+                client.get_lol_league_v4_challenger_league_by_queue(region=region, queue=queue),
+                client.get_lol_league_v4_grandmaster_league_by_queue(region=region, queue=queue),
+                client.get_lol_league_v4_master_league_by_queue(region=region, queue=queue),
+            )
+    lps = [entry.get('leaguePoints', 0) for league in leagues for entry in league.get('entries', [])]
+    return _compute_cutoffs(lps, CUTOFF_RULES[game])
+
+
+# Kept for existing callers: TFT cutoffs, fetched live
 async def get_cutoff(tft_token, region):
-    # grab all players who are challenger, grandmaster, and master
-    async with RiotAPIClient(default_headers={"X-Riot-Token": tft_token}) as client:
-        start = time.perf_counter()
-        challengers, grandmasters, masters = await asyncio.gather(
-            client.get_tft_league_v1_challenger_league(region=region),
-            client.get_tft_league_v1_grandmaster_league(region=region),
-            client.get_tft_league_v1_master_league(region=region),
-        )
-        end = time.perf_counter()
-        print(f"Execution time: {end - start:.4f} seconds")
+    return await fetch_cutoffs("TFT", region, tft_token)
 
-        # put all the lps into a list
-        lps = [entry.get('leaguePoints') for entry in challengers['entries']]
-        lps.extend(entry.get('leaguePoints') for entry in grandmasters['entries'])
-        lps.extend(entry.get('leaguePoints') for entry in masters['entries'])
-        end = time.perf_counter()
-        print(f"Execution time: {end - start:.4f} seconds")
 
-        # sort lps 
-        lps_sorted = sorted(lps, reverse=True)
-        end = time.perf_counter()
-        print(f"Execution time: {end - start:.4f} seconds")
+async def ensure_cutoff_table(pool):
+    async with pool.acquire() as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS rank_cutoffs (
+                game TEXT NOT NULL,
+                region TEXT NOT NULL,
+                snapshot_date DATE NOT NULL,
+                challenger_lp INTEGER NOT NULL,
+                grandmaster_lp INTEGER NOT NULL,
+                updated_at BIGINT NOT NULL,
+                PRIMARY KEY (game, region, snapshot_date)
+            );
+        ''')
 
-        # in the case there are less than 250 masters+ players
-        if len(lps_sorted) < 250:
-            return 500, 200
-        
-        # in the case there are between 250 and 750 masters+ players
-        if len(lps_sorted) < 750:
-            challenger_cutoff = max(500,lps_sorted[249])
-            return challenger_cutoff, 200
-        
-        # return cutoffs, default to 500 and 200 if not enough players to fill out chall/gm
-        challenger_cutoff = max(500,lps_sorted[249])
-        grandmaster_cutoff = max(200,lps_sorted[749])
-    return challenger_cutoff, grandmaster_cutoff
+
+async def load_cutoffs(pool):
+    """Fill the in-memory cache with the most recent stored cutoffs."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT DISTINCT ON (game, region) game, region, challenger_lp, grandmaster_lp
+            FROM rank_cutoffs
+            ORDER BY game, region, snapshot_date DESC;
+        ''')
+    for row in rows:
+        _rank_cutoffs[(row['game'], row['region'])] = (row['challenger_lp'], row['grandmaster_lp'])
+
+
+async def update_cutoffs(pool, tft_token, lol_token, default_region, snapshot_date):
+    """Fetch current cutoffs for every region with linked users and store them under snapshot_date.
+
+    Re-running on the same date overwrites that day's row, so the stored value is the last one seen that day.
+    """
+    async with pool.acquire() as conn:
+        regions = {row['region'] for row in await conn.fetch('SELECT DISTINCT region FROM users WHERE region IS NOT NULL;')}
+    regions.add(default_region)
+
+    for region in regions:
+        for game, token in (("TFT", tft_token), ("League", lol_token)):
+            try:
+                chall, gm = await fetch_cutoffs(game, region, token, background=True)
+            except Exception as e:
+                print(f"[ERROR] Cutoff fetch failed for {game} {region}: {e}")
+                continue
+
+            async with pool.acquire() as conn:
+                await conn.execute('''
+                    INSERT INTO rank_cutoffs (game, region, snapshot_date, challenger_lp, grandmaster_lp, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (game, region, snapshot_date)
+                    DO UPDATE SET challenger_lp = EXCLUDED.challenger_lp,
+                                  grandmaster_lp = EXCLUDED.grandmaster_lp,
+                                  updated_at = EXCLUDED.updated_at;
+                ''', game, region, snapshot_date, chall, gm, int(time.time()))
+            _rank_cutoffs[(game, region)] = (chall, gm)
+            print(f"[CUTOFF] {game} {region}: Challenger {chall} LP, Grandmaster {gm} LP")
+
+
+def get_stored_cutoffs(game, region):
+    """Latest stored (challenger_lp, grandmaster_lp), or None if none are known yet."""
+    return _rank_cutoffs.get((game, region))
 
 # Function to get the trait icon path
 def get_trait_icon(traits_data, traitName):
@@ -457,12 +612,16 @@ def get_champ_asset(set, characterId):
     return f"https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/assets/characters/tft{set}_{characterId}/tft{set}_{characterId}_square.tft_set{set}.png"
 
 # Function to get the item icon path
+# tftitems.json lists some icons as "<name>.tft_setNN.png", but CommunityDragon
+# serves them as "<name>.png" (all Set 18 emblems, potions and boosters, for example).
+_TFT_SET_SUFFIX = re.compile(r"\.tft_set\d+(?=\.png$)", re.IGNORECASE)
+
 def get_item_icon(items_data, itemName):
     for item in items_data:
         if item.get("nameId") == itemName:
-            return item.get("squareIconPath", "")[21:]
+            return _TFT_SET_SUFFIX.sub("", item.get("squareIconPath", "")[21:])
     print(f"tft item {itemName} Not Found")
-    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.tft_set13.png"
+    return "assets/maps/tft/icons/items/hexcore/tft_item_blank.png"
 
 def get_companion_icon(companions_json, contentId):
     for companion in companions_json:
@@ -1332,10 +1491,14 @@ async def champion_image(unit, item_mapping):
                 fetch_image(url, (24,24))
                 for url in item_urls
             ]
-            item_icons = await asyncio.gather(*fetch_tasks)
+            # A missing item icon leaves an empty slot instead of dropping the whole unit
+            item_icons = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
             # Center the items horizontally below the portrait
-            for i, item_icon in enumerate(item_icons):
+            for i, (url, item_icon) in enumerate(zip(item_urls, item_icons)):
+                if isinstance(item_icon, Exception):
+                    print(f"Item icon failed for {url}: {item_icon}")
+                    continue
                 tile_image.paste(item_icon, (24 * i, 92), item_icon)
 
         return tile_image
@@ -1382,7 +1545,21 @@ def time_ago(timestamp):
         years = time_difference // seconds_in_year
         return f"{int(years)} years ago"
 
-def lp_to_div(elo_value):
+def lp_to_div(elo_value, game=None, region=None):
+    # Apex tiers all share the same base elo, so pick the tier from the stored cutoffs.
+    # Without known cutoffs, apex players are shown as Master.
+    if elo_value >= APEX_ELO:
+        lp = elo_value - APEX_ELO
+        tier = "MASTER"
+        cutoffs = get_stored_cutoffs(game, region) if game and region else None
+        if cutoffs:
+            chall, gm = cutoffs
+            if lp >= chall:
+                tier = "CHALLENGER"
+            elif lp >= gm:
+                tier = "GRANDMASTER"
+        return tier, "I", lp
+
     # Reverse mapping: Elo -> rank string
     elo_to_rank = {v: k for k, v in dicts.rank_to_elo.items()}
     sorted_ranks = sorted(elo_to_rank.items(), key=lambda x: x[0])

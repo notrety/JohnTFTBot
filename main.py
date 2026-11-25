@@ -137,6 +137,26 @@ async def scheduler(pool, interval_minutes=5):
         await asyncio.sleep(max(0, interval - elapsed))
 
 
+# Store Challenger/Grandmaster cutoffs daily (refreshed hourly, last value of the day is kept)
+async def cutoff_scheduler(pool, interval_minutes=60):
+    await bot.wait_until_ready()
+    eastern = pytz.timezone("America/New_York")
+
+    try:
+        await helpers.ensure_cutoff_table(pool)
+        await helpers.load_cutoffs(pool)
+    except Exception as e:
+        print(f"Cutoff setup failed: {e}")
+
+    while not bot.is_closed():
+        today = datetime.datetime.now(eastern).date()
+        try:
+            await helpers.update_cutoffs(pool, tft_token, lol_token, region, today)
+        except Exception as e:
+            print(f"Cutoff update failed: {e}")
+        await asyncio.sleep(interval_minutes * 60)
+
+
 # Show bot is online and invoke scheduled snapshot functionality
 @bot.event
 async def on_ready():
@@ -157,6 +177,7 @@ async def on_ready():
     bot.pool = pool
 
     bot.loop.create_task(scheduler(pool, interval_minutes=5))
+    bot.loop.create_task(cutoff_scheduler(pool))
     try:
         await bot.load_extension('commands')
         await bot.tree.sync()
