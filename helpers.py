@@ -520,6 +520,14 @@ async def lobby_average_label(participants, region, lol_token):
 APEX_TIERS = {"MASTER", "GRANDMASTER", "CHALLENGER"}
 
 
+def rank_name(tier, division):
+    """Full rank text like "DIAMOND II". Apex tiers have no divisions, so they're just
+    "MASTER", "GRANDMASTER" or "CHALLENGER"; unranked is just "UNRANKED"."""
+    if tier in APEX_TIERS or tier in ("UNRANKED", "N/A") or not division:
+        return tier
+    return f"{tier} {division}"
+
+
 def rank_label(tier, rank):
     """Short rank text like "D2". Apex tiers have no divisions and unranked players have
     no rank, so those are just "M", "GM", "C" or "U"."""
@@ -587,6 +595,61 @@ async def fetch_cutoffs(game, region, token, background=False):
 # Kept for existing callers: TFT cutoffs, fetched live
 async def get_cutoff(tft_token, region):
     return await fetch_cutoffs("TFT", region, tft_token)
+
+
+async def ensure_game_indexes(pool):
+    """Indexes for per-player lookups. The tables' keys start with match_id, so without
+    these every "this player's games" query (champion stats, !lr, !lt, summaries, LP
+    changes) scans the whole table."""
+    async with pool.acquire() as conn:
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS league_games_puuid_time_idx
+                ON league_games (league_puuid, game_datetime DESC);
+            CREATE INDEX IF NOT EXISTS tft_games_puuid_time_idx
+                ON tft_games (tft_puuid, game_datetime DESC);
+        ''')
+
+
+# Games shorter than this are remakes and are left out of champion stats
+REMAKE_MAX_SECONDS = 300
+
+
+async def get_champion_stats(pool, league_puuid, limit=5):
+    """Most-played Solo/Duo champions this season from stored games:
+    [{champion, games, wins, kills, deaths, assists}] with per-game average K/D/A."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT champion,
+                   COUNT(*) AS games,
+                   COUNT(*) FILTER (WHERE win_loss) AS wins,
+                   AVG(kills)::float AS kills,
+                   AVG(deaths)::float AS deaths,
+                   AVG(assists)::float AS assists
+            FROM league_games
+            WHERE league_puuid = $1
+              AND game_datetime >= $2
+              AND game_duration >= $3
+            GROUP BY champion
+            ORDER BY games DESC, wins DESC
+            LIMIT $4;
+        ''', league_puuid, current_lol_unix * 1000, REMAKE_MAX_SECONDS, limit)
+    return [dict(row) for row in rows]
+
+
+def format_champion_stats(stats):
+    """One line per champion: "**Ahri** · 24 games · 15W 9L (63%) · 6.1 / 4.2 / 7.3 (3.19 KDA)"."""
+    lines = []
+    for s in stats:
+        losses = s['games'] - s['wins']
+        winrate = round(100 * s['wins'] / s['games'])
+        kda = (s['kills'] + s['assists']) / s['deaths'] if s['deaths'] else None
+        kda_str = f"{kda:.2f} KDA" if kda is not None else "Perfect KDA"
+        lines.append(
+            f"**{s['champion']}** · {s['games']} game{'s' if s['games'] != 1 else ''} · "
+            f"{s['wins']}W {losses}L ({winrate}%) · "
+            f"{s['kills']:.1f} / {s['deaths']:.1f} / {s['assists']:.1f} ({kda_str})"
+        )
+    return "\n".join(lines)
 
 
 async def ensure_cutoff_table(pool):
@@ -915,7 +978,7 @@ async def get_rank_embed(name, tagLine, region, tft_token, puuid):
 
                 # Create an embed message
                 embed = discord.Embed(
-                    description=f"🏆 **{tier} {rank}** ({lp} LP)\n🎯 **Top 4 Rate:** {top_four_rate}%\n📊 **Total Games:** {total_games}",
+                    description=f"🏆 **{rank_name(tier, rank)}** ({lp} LP)\n🎯 **Top 4 Rate:** {top_four_rate}%\n📊 **Total Games:** {total_games}",
                     color=discord.Color.blue()
                 )
                 embed.set_thumbnail(url=rank_icon_url)  # Set the rank icon
@@ -951,7 +1014,7 @@ async def get_lol_rank_embed(name, tagLine, region, lol_token, puuid):
 
                 # Create an embed message
                 embed = discord.Embed(
-                    description=f"🏆 **{tier} {rank}** ({lp} LP)\n🎯 **Win Rate:** {win_rate}%\n📊 **Total Games:** {total_games}",
+                    description=f"🏆 **{rank_name(tier, rank)}** ({lp} LP)\n🎯 **Win Rate:** {win_rate}%\n📊 **Total Games:** {total_games}",
                     color=discord.Color.blue()
                 )
                 embed.set_thumbnail(url=rank_icon_url)  # Set the rank icon

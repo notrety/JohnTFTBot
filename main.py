@@ -108,7 +108,8 @@ def bot_prefix(bot, message):
     return commands.when_mentioned(bot, message)
 
 # Create bot instance
-bot = commands.Bot(command_prefix=bot_prefix, intents=intents, case_insensitive=True)
+# help_command=None: !help is the custom how-to guide in commands.py, not discord.py's command list
+bot = commands.Bot(command_prefix=bot_prefix, intents=intents, case_insensitive=True, help_command=None)
 # Define regions
 mass_region = "americas"
 region = "na1"        
@@ -175,6 +176,11 @@ async def on_ready():
     bot.runes_mapping = runes_mapping
     bot.summs_mapping = summs_mapping
     bot.pool = pool
+
+    try:
+        await helpers.ensure_game_indexes(pool)
+    except Exception as e:
+        print(f"Index setup failed: {e}")
 
     bot.loop.create_task(scheduler(pool, interval_minutes=5))
     bot.loop.create_task(cutoff_scheduler(pool))

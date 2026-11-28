@@ -77,8 +77,22 @@ class BotCommands(commands.Cog):
 
         if error_message:
             await ctx.send(error_message)
-        else:
-            await ctx.send(embed=rank_embed)
+            return
+
+        # Champion stats from stored Solo/Duo games (only exists for linked players)
+        try:
+            champ_stats = await helpers.get_champion_stats(self.pool, puuid)
+        except Exception as e:
+            print(f"Champion stats failed for {gameName}#{tagLine}: {e}")
+            champ_stats = []
+        if champ_stats:
+            rank_embed.add_field(
+                name="Top champions this season",
+                value=helpers.format_champion_stats(champ_stats),
+                inline=False
+            )
+
+        await ctx.send(embed=rank_embed)
 
     # Command to fetch last match data
     @commands.command(name="recent", aliases=["rs","r","rr","rn","rh","rd","rg"])
@@ -755,8 +769,8 @@ class BotCommands(commands.Cog):
         url = await helpers.get_pfp(user_row['region'], user_row['league_puuid'], self.lol_token)
 
         text = (
-            f"{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP "
-            f"→ {dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP\n"
+            f"{dicts.tier_to_rank_icon.get(old_rank, '')} {helpers.rank_name(old_rank, old_tier)} {old_lp} LP "
+            f"→ {dicts.tier_to_rank_icon.get(new_rank, '')} {helpers.rank_name(new_rank, new_tier)} {new_lp} LP\n"
             f"{lp_diff_emoji} **LP Difference:** {diff_str}\n"
             f"🏆 **Record:** {wins} - {len(matches) - wins}"
         )
@@ -940,9 +954,9 @@ class BotCommands(commands.Cog):
             new_lp_str = f"{e['new_lp']:>{lp_width}}"
 
             e["rank_str"] = (
-                f"{dicts.rank_to_acronym[e['old_rank']]}{dicts.rank_to_number[e['old_tier']]} {old_lp_str} LP"
+                f"{helpers.rank_label(e['old_rank'], e['old_tier'])} {old_lp_str} LP"
                 f" -> "
-                f"{dicts.rank_to_acronym[e['new_rank']]}{dicts.rank_to_number[e['new_tier']]} {new_lp_str} LP"
+                f"{helpers.rank_label(e['new_rank'], e['new_tier'])} {new_lp_str} LP"
             )
 
         print("rank strings prepared")
@@ -1104,9 +1118,9 @@ class BotCommands(commands.Cog):
             new_lp_str = f"{e['new_lp']:>{lp_width}}"
 
             e["rank_str"] = (
-                f"{dicts.rank_to_acronym[e['old_rank']]}{dicts.rank_to_number[e['old_tier']]} {old_lp_str} LP"
+                f"{helpers.rank_label(e['old_rank'], e['old_tier'])} {old_lp_str} LP"
                 f" -> "
-                f"{dicts.rank_to_acronym[e['new_rank']]}{dicts.rank_to_number[e['new_tier']]} {new_lp_str} LP"
+                f"{helpers.rank_label(e['new_rank'], e['new_tier'])} {new_lp_str} LP"
             )
 
         total_lp = sum(e["league_diff"] for e in entries)
@@ -1291,14 +1305,14 @@ class BotCommands(commands.Cog):
             icon = dicts.tier_to_rank_icon[user_tier]
             if user_tier != "UNRANKED":
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank} • {user_lp} LP**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {helpers.rank_name(user_tier, user_rank)} • {user_lp} LP**\n"
                 else:
-                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank} • {user_lp} LP\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {helpers.rank_name(user_tier, user_rank)} • {user_lp} LP\n"
             else:
                 if name == gameName and tag == tagLine:
-                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank}**\n"
+                    result += f"**{index + 1}** - **[__{name_and_tag}__](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {helpers.rank_name(user_tier, user_rank)}**\n"
                 else:
-                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {user_tier} {user_rank}\n"
+                    result += f"**{index + 1}** - [{name_and_tag}](https://lolchess.gg/profile/{region[:-1]}/{name.replace(" ", "%20")}-{tag}/): {icon} {helpers.rank_name(user_tier, user_rank)}\n"
         
         if server:
             embed_title= "Server TFT Ranked Leaderboard"
@@ -1373,9 +1387,9 @@ class BotCommands(commands.Cog):
 
             profile_url = f"https://op.gg/lol/summoners/{region[:-1]}/{name.replace(' ', '%20')}-{tag}"
             if user_tier != "UNRANKED":
-                text = f"{icon} {user_tier} {user_rank} • {user_lp} LP"
+                text = f"{icon} {helpers.rank_name(user_tier, user_rank)} • {user_lp} LP"
             else:
-                text = f"{icon} {user_tier} {user_rank}"
+                text = f"{icon} {helpers.rank_name(user_tier, user_rank)}"
 
             if name == gameName and tag == tagLine:
                 result += f"**{index + 1}** - **[__{name_and_tag}__]({profile_url}): {text}**\n"
@@ -1628,8 +1642,8 @@ class BotCommands(commands.Cog):
         avg_placement = round(total_placement / len(placements), 1) if placements else "N/A"
 
         text = (
-            f"{dicts.tier_to_rank_icon.get(old_rank, '')} {old_rank} {old_tier} {old_lp} LP -> "
-            f"{dicts.tier_to_rank_icon.get(new_rank, '')} {new_rank} {new_tier} {new_lp} LP\n"
+            f"{dicts.tier_to_rank_icon.get(old_rank, '')} {helpers.rank_name(old_rank, old_tier)} {old_lp} LP -> "
+            f"{dicts.tier_to_rank_icon.get(new_rank, '')} {helpers.rank_name(new_rank, new_tier)} {new_lp} LP\n"
             f"{lp_diff_emoji} **LP Difference:** {tft_diff_str}\n"
             f"📊 **Games Played:** {len(placements)}\n"
             f"⭐ **AVP:** {avg_placement}\n"
@@ -1651,6 +1665,47 @@ class BotCommands(commands.Cog):
         embed.set_footer(text="Last five matches below")
 
         await ctx.send(embed=embed)
+
+    # Short how-to guide; the full command list lives in !commands
+    @commands.command(name="help", aliases=["howto", "guide"])
+    async def help(self, ctx):
+        help_embed = discord.Embed(
+            title="How to use the bot",
+            description=(
+                "Look up TFT and League of Legends ranks, matches and LP. "
+                "Commands start with `!`, and `!commands` lists every one."
+            ),
+            color=discord.Color.blue()
+        )
+
+        help_embed.add_field(name="1. Link your account (recommended)", inline=False, value=(
+            "Use `/link name tag region`, e.g. `/link john_doe NA1 na1`.\n"
+            "Your ranked games from this season load in the background over a few minutes."
+        ))
+
+        help_embed.add_field(name="If you're linked", inline=False, value=(
+            "• Commands use your account by default: `!s`, `!r`, `!lr`, `!h`\n"
+            "• Look up other linked players with `@user`: `!r @user`\n"
+            "• Track your day with `!t` (TFT) and `!lt` (League)\n"
+            "• Matches from `!r` and `!lr` show your LP change\n"
+            "• You appear on leaderboards (`!lb`, `!llb`) and server summaries (`!sum`, `!lsum`)\n"
+            "• Works on any region"
+        ))
+
+        help_embed.add_field(name="If you're not linked", inline=False, value=(
+            f"• Give a Riot ID each time: `!s name tag`, `!lr name tag` "
+            f"(use `_` for spaces in names)\n"
+            f"• Lookups use the bot's default region ({self.region.upper()})\n"
+            "• No `!t` / `!lt`, LP changes, leaderboards or summaries"
+        ))
+
+        help_embed.add_field(name="Picking a match", inline=False, value=(
+            "Put a number first to go further back: `!r 3` is your 3rd most recent game.\n"
+            "Letters after a command pick the mode: `!rd` double up, `!lra` ARAM. See `!commands`."
+        ))
+
+        help_embed.set_footer(text="Daily stats reset at 6am Eastern")
+        await ctx.send(embed=help_embed)
 
     # Command to list all available commands, update as new commands are added
     @commands.command(name="commands", aliases=["command"])
