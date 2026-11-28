@@ -11,6 +11,7 @@ from pulsefire.clients import RiotAPIClient
 from pulsefire.taskgroups import TaskGroup
 from pulsefire.middlewares import json_response_middleware, http_error_middleware, rate_limiter_middleware
 from pulsefire.ratelimiters import RiotAPIRateLimiter
+from discord.http import Route
 import os
 import re
 import hashlib
@@ -636,16 +637,39 @@ async def get_champion_stats(pool, league_puuid, limit=5):
     return [dict(row) for row in rows]
 
 
+# Bot application emojis by lowercased name, e.g. "ahri" -> "<:Ahri:123...>"
+# (uploaded with sync_champion_emojis.py, loaded once at startup)
+_app_emojis: dict[str, str] = {}
+
+
+async def load_app_emojis(bot):
+    """Load the bot's application emojis. Uses a raw API call so it works on any discord.py 2.x."""
+    data = await bot.http.request(Route("GET", "/applications/{application_id}/emojis",
+                                        application_id=bot.application_id))
+    items = data.get("items", []) if isinstance(data, dict) else data
+    _app_emojis.clear()
+    for emoji in items:
+        prefix = "a" if emoji.get("animated") else ""
+        _app_emojis[emoji["name"].lower()] = f"<{prefix}:{emoji['name']}:{emoji['id']}>"
+    print(f"Loaded {len(_app_emojis)} application emojis")
+
+
+def champion_emoji(champion):
+    """Emoji for a champion's internal name (as stored in league_games), or "" if none was uploaded."""
+    return _app_emojis.get((champion or "").lower(), "")
+
+
 def format_champion_stats(stats):
-    """One line per champion: "**Ahri** · 24 games · 15W 9L (63%) · 6.1 / 4.2 / 7.3 (3.19 KDA)"."""
+    """One line per champion: "<emoji> **Ahri** · 24 games · 15W 9L (63%) · 6.1 / 4.2 / 7.3 (3.19 KDA)"."""
     lines = []
     for s in stats:
+        emoji = champion_emoji(s['champion'])
         losses = s['games'] - s['wins']
         winrate = round(100 * s['wins'] / s['games'])
         kda = (s['kills'] + s['assists']) / s['deaths'] if s['deaths'] else None
         kda_str = f"{kda:.2f} KDA" if kda is not None else "Perfect KDA"
         lines.append(
-            f"**{s['champion']}** · {s['games']} game{'s' if s['games'] != 1 else ''} · "
+            f"{emoji + ' ' if emoji else ''}**{s['champion']}** · {s['games']} game{'s' if s['games'] != 1 else ''} · "
             f"{s['wins']}W {losses}L ({winrate}%) · "
             f"{s['kills']:.1f} / {s['deaths']:.1f} / {s['assists']:.1f} ({kda_str})"
         )
@@ -958,76 +982,162 @@ async def calculate_elo(puuid, game, token, region, background=False, queue_type
             raise e  # Re-raise other errors
 
 # Function to get TFT rank info from puuid and return embed with rank icon
-async def get_rank_embed(name, tagLine, region, tft_token, puuid):
+# ---------------------------------------------------------------------------
+# !s / !ls rank overview
+# ---------------------------------------------------------------------------
+
+def day_start_ms():
+    """Start of the bot's "today" (6am Eastern, same as !t / !lt) in unix milliseconds."""
+    eastern = pytz.timezone("America/New_York")
+    now = datetime.now(eastern)
+    start = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    if now < start:
+        start -= timedelta(days=1)
+    return int(start.timestamp()) * 1000
+
+
+def format_next_cutoff(game, region, lp):
+    """LP needed for the Grandmaster/Challenger cutoff (Master+ players only)."""
+    cutoffs = get_stored_cutoffs(game, region)
+    if not cutoffs:
+        return "Cutoffs not loaded yet"
+    chall, gm = cutoffs
+    if lp < gm:
+        return f"{gm - lp} LP to GM\n(cutoff {gm} LP)"
+    if lp < chall:
+        return f"{chall - lp} LP to Challenger\n(cutoff {chall} LP)"
+    return f"{lp - chall} LP above\nChallenger cutoff ({chall})"
+
+
+# Blank embed field content (Discord rejects truly empty field names/values)
+ZERO_WIDTH_SPACE = chr(0x200B)
+
+
+async def get_today_form(pool, game, puuid):
+    """Today's stored ranked games and LP change, or None if the bot has no games stored for this player."""
+    since = day_start_ms()
+    table, puuid_col, cols = (("tft_games", "tft_puuid", "placement, elo") if game == "TFT"
+                              else ("league_games", "league_puuid", "win_loss, elo, game_duration"))
+    async with pool.acquire() as conn:
+        today = await conn.fetch(f'''
+            SELECT {cols} FROM {table}
+            WHERE {puuid_col} = $1 AND game_datetime >= $2
+            ORDER BY game_datetime DESC;
+        ''', puuid, since)
+        start = await conn.fetchrow(f'''
+            SELECT elo FROM {table}
+            WHERE {puuid_col} = $1 AND game_datetime < $2 AND elo IS NOT NULL
+            ORDER BY game_datetime DESC LIMIT 1;
+        ''', puuid, since)
+        tracked = bool(today or start) or await conn.fetchval(
+            f"SELECT EXISTS (SELECT 1 FROM {table} WHERE {puuid_col} = $1)", puuid)
+
+    if not tracked:
+        return None
+
+    # LP change today: newest stored elo today minus the last elo before today
+    latest_elo = next((r['elo'] for r in today if r['elo'] is not None), None)
+    lp_change = latest_elo - start['elo'] if latest_elo is not None and start else None
+
+    return {"today": [dict(r) for r in today], "lp_change": lp_change}
+
+
+def format_today(game, form):
+    rows = form["today"]
+    if game == "League":
+        rows = [r for r in rows if (r.get('game_duration') or 0) >= REMAKE_MAX_SECONDS]
+    if not rows:
+        return "No games yet"
+
+    # Result first, then the LP change on the same line (left out if it can't be worked out)
+    lp = form["lp_change"]
+    lp_suffix = f"  **{lp:+d} LP**" if lp is not None else ""
+    if game == "TFT":
+        placements = [r['placement'] for r in rows]
+        return f"{len(placements)} games, avg {sum(placements) / len(placements):.1f}{lp_suffix}"
+    wins = sum(r['win_loss'] for r in rows)
+    return f"{wins}W {len(rows) - wins}L{lp_suffix}"
+
+
+async def build_rank_embed(game, name, tagLine, region, token, puuid, pool=None):
+    """!s (game="TFT") / !ls (game="League") overview, two columns:
+        Rank   |  | Record
+        Today  |  | Next cutoff
+    Discord can't right-align text, so a blank middle field pushes the second field of each row
+    into the right-hand column. Today comes from stored games, so it only appears for players the bot tracks."""
     gameName = name.replace("_", " ")
-    try: 
-        rank_info = await get_rank_info(region, puuid, tft_token)
+    queue = "RANKED_TFT" if game == "TFT" else "RANKED_SOLO_5x5"
+    try:
+        if game == "TFT":
+            rank_info = await get_rank_info(region, puuid, token)
+        else:
+            rank_info = await get_lol_rank_info(region, puuid, token)
     except Exception as err:
         return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
-    if rank_info:
-        for entry in rank_info:
-            if entry['queueType'] == 'RANKED_TFT':
-                tier = entry['tier']
-                rank = entry['rank']
-                lp = entry['leaguePoints']
-                total_games = entry['wins'] + entry['losses']
-                top_four_rate = round(entry['wins'] / total_games * 100, 2) if total_games else 0
 
-                # Get rank icon URL from Data Dragon github 
-                rank_icon_url = "https://raw.githubusercontent.com/InFinity54/LoL_DDragon/refs/heads/master/extras/tier/" + tier.lower() + ".png"
+    entry = next((e for e in rank_info or [] if e['queueType'] == queue), None)
+    if not entry:
+        return None, f"{gameName}#{tagLine} is unranked."
 
-                # Create an embed message
-                embed = discord.Embed(
-                    description=f"🏆 **{rank_name(tier, rank)}** ({lp} LP)\n🎯 **Top 4 Rate:** {top_four_rate}%\n📊 **Total Games:** {total_games}",
-                    color=discord.Color.blue()
-                )
-                embed.set_thumbnail(url=rank_icon_url)  # Set the rank icon
-                embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
-                embed.set_author(
-                    name=f"TFT Stats for {gameName}#{tagLine}",
-                    url=f"https://lolchess.gg/profile/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}/",
-                    icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/6/67/Teamfight_Tactics_icon.png/revision/latest/scale-to-width/360?cb=20191018215638"
-                )
+    tier, rank, lp = entry['tier'], entry['rank'], entry['leaguePoints']
+    wins, losses = entry['wins'], entry['losses']
+    total = wins + losses
+    rate = round(wins / total * 100, 1) if total else 0
 
-                return embed, None  # Return the embed
-            
-    return None, f"{gameName}#{tagLine} is unranked."
+    embed = discord.Embed(color=discord.Color.blue())
+    profile_name = gameName.replace(' ', '%20')
+    if game == "TFT":
+        embed.set_author(
+            name=f"TFT Stats for {gameName}#{tagLine}",
+            url=f"https://lolchess.gg/profile/{region[:-1]}/{profile_name}-{tagLine}/",
+            icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/6/67/Teamfight_Tactics_icon.png/revision/latest/scale-to-width/360?cb=20191018215638"
+        )
+        record = f"{total} games\nTop 4: {rate}%"
+        embed.set_footer(text="Powered by Riot API | Data from TFT Ranked")
+    else:
+        embed.set_author(
+            name=f"LOL Stats for {gameName}#{tagLine}",
+            url=f"https://op.gg/lol/summoners/{region[:-1]}/{profile_name}-{tagLine}",
+            icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250?cb=20191029062637"
+        )
+        record = f"{wins}W {losses}L\n{rate}% \u00b7 {total} games"
+        embed.set_footer(text="Powered by Riot API | Data from LOL Ranked")
 
-# Function to get LOL rank info from puuid and return embed with rank icon
-async def get_lol_rank_embed(name, tagLine, region, lol_token, puuid):
-    gameName = name.replace("_", " ")
-    try: 
-        rank_info = await get_lol_rank_info(region, puuid, lol_token)
-    except Exception as err:
-        return None, f"Error fetching rank info for {gameName}#{tagLine}: {err}"
-    if rank_info:
-        for entry in rank_info:
-            if entry['queueType'] == 'RANKED_SOLO_5x5':
-                tier = entry['tier']
-                rank = entry['rank']
-                lp = entry['leaguePoints']
-                total_games = entry['wins'] + entry['losses']
-                win_rate = round(entry['wins'] / total_games * 100, 2) if total_games else 0
+    rank_icon = dicts.tier_to_rank_icon.get(tier, "\U0001F3C6")
+    form = None
+    if pool:
+        try:
+            form = await get_today_form(pool, game, puuid)
+        except Exception as e:
+            print(f"[WARN] Today lookup failed for {gameName}#{tagLine}: {e}")
 
-                # Get rank icon URL from Data Dragon github 
-                rank_icon_url = "https://raw.githubusercontent.com/InFinity54/LoL_DDragon/refs/heads/master/extras/tier/" + tier.lower() + ".png"
+    def spacer():
+        embed.add_field(name=ZERO_WIDTH_SPACE, value=ZERO_WIDTH_SPACE, inline=True)
 
-                # Create an embed message
-                embed = discord.Embed(
-                    description=f"🏆 **{rank_name(tier, rank)}** ({lp} LP)\n🎯 **Win Rate:** {win_rate}%\n📊 **Total Games:** {total_games}",
-                    color=discord.Color.blue()
-                )
-                embed.set_thumbnail(url=rank_icon_url)  # Set the rank icon
-                embed.set_footer(text="Powered by Riot API | Data from LOL Ranked")
-                embed.set_author(
-                    name=f"LOL Stats for {gameName}#{tagLine}",
-                    url=f"https://op.gg/lol/summoners/{region[:-1]}/{gameName.replace(" ", "%20")}-{tagLine}",
-                    icon_url="https://static.wikia.nocookie.net/leagueoflegends/images/9/9a/League_of_Legends_Update_Logo_Concept_05.jpg/revision/latest/scale-to-width-down/250?cb=20191029062637"
-                )
+    # Row 1: Rank (left), Record (right)
+    rank_value = f"{rank_icon} **{rank_name(tier, rank)}**" + "\n" + f"{lp} LP"
+    embed.add_field(name="Rank", value=rank_value, inline=True)
+    spacer()
+    embed.add_field(name="Record", value=record, inline=True)
+    # Row 2: Today (left, tracked players only), Next cutoff (right, Master+ only)
+    if form:
+        embed.add_field(name="Today", value=format_today(game, form), inline=True)
+    if tier in APEX_TIERS:
+        if not form:
+            spacer()
+        spacer()
+        embed.add_field(name="Next cutoff", value=format_next_cutoff(game, region, lp), inline=True)
 
-                return embed, None  # Return the embed
-            
-    return None, f"{gameName}#{tagLine} is unranked."
+    return embed, None
+
+
+async def get_rank_embed(name, tagLine, region, tft_token, puuid, pool=None):
+    return await build_rank_embed("TFT", name, tagLine, region, tft_token, puuid, pool)
+
+
+async def get_lol_rank_embed(name, tagLine, region, lol_token, puuid, pool=None):
+    return await build_rank_embed("League", name, tagLine, region, lol_token, puuid, pool)
+
 
 def round_elo_to_rank(avg_elo):
     if avg_elo > 2800:

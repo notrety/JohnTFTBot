@@ -52,7 +52,7 @@ class BotCommands(commands.Cog):
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
             
-        rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.tft_token, puuid)
+        rank_embed, error_message = await helpers.get_rank_embed(gameName, tagLine, region, self.tft_token, puuid, self.pool)
 
         if error_message:
             await ctx.send(error_message)
@@ -73,7 +73,7 @@ class BotCommands(commands.Cog):
                 print(f"Could not find PUUID for {gameName}#{tagLine}.")
                 return f"Could not find PUUID for {gameName}#{tagLine}.", None, None
             
-        rank_embed, error_message = await helpers.get_lol_rank_embed(gameName, tagLine, region, self.lol_token, puuid)
+        rank_embed, error_message = await helpers.get_lol_rank_embed(gameName, tagLine, region, self.lol_token, puuid, self.pool)
 
         if error_message:
             await ctx.send(error_message)

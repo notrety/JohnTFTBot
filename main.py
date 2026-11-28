@@ -182,6 +182,12 @@ async def on_ready():
     except Exception as e:
         print(f"Index setup failed: {e}")
 
+    # Champion icon emojis for !ls (uploaded with sync_champion_emojis.py)
+    try:
+        await helpers.load_app_emojis(bot)
+    except Exception as e:
+        print(f"Loading application emojis failed: {e}")
+
     bot.loop.create_task(scheduler(pool, interval_minutes=5))
     bot.loop.create_task(cutoff_scheduler(pool))
     try:
